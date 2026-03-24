@@ -2,7 +2,7 @@
   "name": "agent-flow",
   "displayName": "Agent Flow",
   "description": "Real-time visualization of Claude Code agent orchestration",
-  "version": "0.4.7",
+  "version": "0.5.0",
   "publisher": "simon-p",
   "license": "Apache-2.0",
   "repository": {
@@ -11,15 +11,72 @@
   },
   "icon": "media/icon.png",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.93.0"
   },
-  "categories": ["Visualization", "Other"],
-  "keywords": ["llm", "agent", "claude", "ai", "visualization", "orchestration"],
+  "categories": [
+    "Visualization",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "llm",
+    "agent",
+    "claude",
+    "copilot",
+    "ai",
+    "visualization",
+    "orchestration",
+    "chat"
+  ],
   "activationEvents": [
-    "onWebviewPanel:agentVisualizer"
+    "onWebviewPanel:agentVisualizer",
+    "onChatParticipant:agent-flow.visualizer"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "agent-flow.visualizer",
+        "fullName": "Agent Flow",
+        "name": "agent-flow",
+        "description": "Real-time visualization of AI agent orchestration — see active sessions, tool calls, and agent activity.",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "status",
+            "description": "Show current agent session status and activity"
+          },
+          {
+            "name": "open",
+            "description": "Open the Agent Flow visualizer panel"
+          },
+          {
+            "name": "sessions",
+            "description": "List all active and recent agent sessions"
+          }
+        ]
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "agentFlow_getSessionStatus",
+        "description": "Returns the current status of agent sessions being visualized by Agent Flow, including active sessions, tool calls in progress, and connection state.",
+        "tags": [
+          "agent-flow",
+          "sessions",
+          "status"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "Optional session ID to get status for a specific session. If omitted, returns all active sessions."
+            }
+          }
+        }
+      }
+    ],
     "commands": [
       {
         "command": "agentVisualizer.open",
@@ -39,6 +96,11 @@
       {
         "command": "agentVisualizer.configureHooks",
         "title": "Configure Claude Code Hooks",
+        "category": "Agent Flow"
+      },
+      {
+        "command": "agentVisualizer.watchCopilotChat",
+        "title": "Watch Copilot Chat Activity",
         "category": "Agent Flow"
       }
     ],
@@ -66,12 +128,17 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically open the visualizer when an agent session starts"
+        },
+        "agentVisualizer.watchCopilotChat": {
+          "type": "boolean",
+          "default": true,
+          "description": "Watch GitHub Copilot Chat activity and visualize tool calls and agent events"
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "cp ../README.md ./README.md && npm run build:all",
+    "vscode:prepublish": "node -e \"require('fs').copyFileSync('../README.md','./README.md')\" && npm run build:all",
     "build": "node esbuild.js",
     "build:webview": "cd ../web && pnpm run build:webview",
     "build:all": "npm run build:webview && npm run build",
@@ -81,8 +148,8 @@
     "vscode:uninstall": "node scripts/uninstall.js"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.93.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.3.0"
   }

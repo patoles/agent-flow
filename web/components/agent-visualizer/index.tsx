@@ -354,6 +354,14 @@ export function AgentVisualizer() {
         timelineEntries={timelineEntries}
         currentTime={currentTime}
         onClose={() => setShowTimeline(false)}
+        onSeek={(time) => {
+          seekingRef.current = true
+          pause()
+          seekToTime(time)
+          setZoomToFitTrigger(n => n + 1)
+          if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+          resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; seekingRef.current = false }, TIMING.seekCompleteDelayMs)
+        }}
       />
 
       {/* Top bar: session tabs + info/controls */}

@@ -3,6 +3,9 @@ import { VisualizerPanel } from './webview-provider'
 import { JsonlEventSource } from './event-source'
 import { HookServer } from './hook-server'
 import { SessionWatcher } from './session-watcher'
+import { CopilotWatcher } from './copilot-watcher'
+import { registerChatParticipant } from './copilot-chat-participant'
+import { registerLanguageModelTools } from './copilot-lm-tools'
 import { AgentEvent, WebviewToExtensionMessage } from './protocol'
 import {
   ORCHESTRATOR_NAME, HOOK_SERVER_NOT_STARTED,
@@ -34,6 +37,7 @@ function filterOrchestratorCompletion(event: AgentEvent): AgentEvent | null {
 let eventSource: JsonlEventSource | undefined
 let hookServer: HookServer | undefined
 let sessionWatcher: SessionWatcher | undefined
+let copilotWatcher: CopilotWatcher | undefined
 
 export async function activate(context: vscode.ExtensionContext) {
   log.info('Extension activated')
@@ -154,6 +158,71 @@ export async function activate(context: vscode.ExtensionContext) {
 
   sessionWatcher.start()
 
+  // ─── Start the Copilot Chat watcher ─────────────────────────────────────
+
+  copilotWatcher = new CopilotWatcher()
+  context.subscriptions.push(copilotWatcher)
+
+  copilotWatcher.onEvent((event) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (!panel || !panel.isReady) { return }
+    panel.sendEvent(event)
+  })
+
+  copilotWatcher.onSessionDetected((sessionId) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (panel) {
+      panel.setConnectionStatus('watching', `Copilot Chat session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`)
+    }
+    vscode.window.setStatusBarMessage(`Agent Flow: watching Copilot session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`, STATUS_MESSAGE_DURATION_MS)
+  })
+
+  copilotWatcher.onSessionLifecycle((lifecycle) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (!panel) { return }
+    if (lifecycle.type === 'started') {
+      panel.postMessage({
+        type: 'session-started',
+        session: {
+          id: lifecycle.sessionId,
+          label: lifecycle.label,
+          status: 'active' as const,
+          startTime: Date.now(),
+          lastActivityTime: Date.now(),
+        },
+      })
+    } else if (lifecycle.type === 'updated') {
+      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label })
+    } else {
+      panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
+    }
+  })
+
+  copilotWatcher.start()
+
+  // ─── Register Copilot Chat participant & LM tools ──────────────────────
+
+  const allActiveSessions = () => [
+    ...(sessionWatcher?.getActiveSessions() ?? []),
+    ...(copilotWatcher?.getActiveSessions() ?? []),
+  ]
+
+  context.subscriptions.push(
+    registerChatParticipant(context, {
+      getActiveSessions: allActiveSessions,
+      getHookPort: () => hookServer?.getPort() ?? 0,
+      isSessionWatcherActive: () => sessionWatcher?.isActive() ?? false,
+      isCopilotWatcherActive: () => copilotWatcher?.isActive() ?? false,
+      copilotWatcher,
+    }),
+  )
+
+  const lmToolDisposables = registerLanguageModelTools(context, {
+    getActiveSessions: allActiveSessions,
+    getHookPort: () => hookServer?.getPort() ?? 0,
+  })
+  context.subscriptions.push(...lmToolDisposables)
+
   // ─── Commands ──────────────────────────────────────────────────────────────
 
   context.subscriptions.push(
@@ -176,6 +245,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('agentVisualizer.connectToAgent', async () => {
       const choice = await vscode.window.showQuickPick(
         [
+          { label: '$(copilot) Copilot Chat', description: 'Watch GitHub Copilot Chat activity', value: 'copilot' },
           { label: '$(radio-tower) Claude Code Hooks', description: 'Auto-configure hooks for live streaming', value: 'hooks' },
           { label: '$(file) Watch JSONL File', description: 'Watch a file for agent events', value: 'jsonl' },
           { label: '$(play) Mock Data', description: 'Use built-in demo scenario', value: 'mock' },
@@ -185,7 +255,17 @@ export async function activate(context: vscode.ExtensionContext) {
 
       if (!choice) { return }
 
-      if (choice.value === 'hooks') {
+      if (choice.value === 'copilot') {
+        if (copilotWatcher && !copilotWatcher.isActive()) {
+          copilotWatcher.start()
+        }
+        const sessionId = copilotWatcher?.createSession()
+        const panel = VisualizerPanel.getCurrent() ?? VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.One)
+        wirePanel(panel)
+        if (sessionId) {
+          panel.setConnectionStatus('watching', 'Copilot Chat')
+        }
+      } else if (choice.value === 'hooks') {
         await configureClaudeHooks()
       } else if (choice.value === 'jsonl') {
         const fileUri = await vscode.window.showOpenDialog({
@@ -211,6 +291,23 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agentVisualizer.configureHooks', async () => {
       await configureClaudeHooks()
+    }),
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agentVisualizer.watchCopilotChat', () => {
+      if (!copilotWatcher) {
+        copilotWatcher = new CopilotWatcher()
+        context.subscriptions.push(copilotWatcher)
+      }
+      if (!copilotWatcher.isActive()) {
+        copilotWatcher.start()
+      }
+      const sessionId = copilotWatcher.createSession()
+      const panel = VisualizerPanel.getCurrent() ?? VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.One)
+      wirePanel(panel)
+      panel.setConnectionStatus('watching', 'Copilot Chat')
+      vscode.window.showInformationMessage('Agent Flow: Now watching Copilot Chat activity')
     }),
   )
 
@@ -252,10 +349,20 @@ function wirePanel(panel: VisualizerPanel): void {
             sessionWatcher.replaySessionStart(sessions.map(s => s.id))
           }
         }
-        if (hookServer && hookServer.getPort() > 0) {
-          panel.setConnectionStatus('watching', `Hooks :${hookServer.getPort()} + session watcher`)
-        } else {
-          panel.setConnectionStatus('watching', 'Session watcher')
+        // Also replay any active Copilot sessions
+        if (copilotWatcher) {
+          const copilotSessions = copilotWatcher.getActiveSessions()
+          if (copilotSessions.length > 0) {
+            panel.postMessage({ type: 'session-list', sessions: copilotSessions })
+            copilotWatcher.replaySessionStart(copilotSessions.map(s => s.id))
+          }
+        }
+        {
+          const sources: string[] = []
+          if (hookServer && hookServer.getPort() > 0) sources.push(`Hooks :${hookServer.getPort()}`)
+          if (sessionWatcher?.isActive()) sources.push('Session watcher')
+          if (copilotWatcher?.isActive()) sources.push('Copilot Chat')
+          panel.setConnectionStatus('watching', sources.join(' + ') || 'Waiting for activity')
         }
         break
 
@@ -356,6 +463,10 @@ export function deactivate(): void {
   if (sessionWatcher) {
     sessionWatcher.dispose()
     sessionWatcher = undefined
+  }
+  if (copilotWatcher) {
+    copilotWatcher.dispose()
+    copilotWatcher = undefined
   }
 }
 

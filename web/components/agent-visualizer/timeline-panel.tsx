@@ -9,9 +9,10 @@ interface TimelinePanelProps {
   timelineEntries: Map<string, TimelineEntry>
   currentTime: number
   onClose: () => void
+  onSeek?: (time: number) => void
 }
 
-export function TimelinePanel({ visible, timelineEntries, currentTime, onClose }: TimelinePanelProps) {
+export function TimelinePanel({ visible, timelineEntries, currentTime, onClose, onSeek }: TimelinePanelProps) {
   const entries = Array.from(timelineEntries.values())
     .sort((a, b) => a.startTime - b.startTime)
 
@@ -58,7 +59,15 @@ export function TimelinePanel({ visible, timelineEntries, currentTime, onClose }
             {/* Time markers header */}
             <div className="flex" style={{ height: headerHeight }}>
               <div style={{ width: labelWidth, flexShrink: 0 }} />
-              <div className="flex-1 relative">
+              <div
+                className="flex-1 relative"
+                style={{ cursor: onSeek ? 'pointer' : undefined }}
+                onClick={onSeek ? (e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                  onSeek(minTime + fraction * timeSpan)
+                } : undefined}
+              >
                 {markers.map(t => {
                   const left = ((t - minTime) / timeSpan) * 100
                   return (
@@ -91,7 +100,15 @@ export function TimelinePanel({ visible, timelineEntries, currentTime, onClose }
                 </div>
 
                 {/* Blocks bar */}
-                <div className="flex-1 relative" style={{ height: 14 }}>
+                <div
+                  className="flex-1 relative"
+                  style={{ height: 14, cursor: onSeek ? 'pointer' : undefined }}
+                  onClick={onSeek ? (e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    onSeek(minTime + fraction * timeSpan)
+                  } : undefined}
+                >
                   {/* Background track */}
                   <div
                     className="absolute inset-0 rounded-sm"

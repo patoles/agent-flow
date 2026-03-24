@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- Feature: Agentic proxy for GitHub Copilot Chat — type `@agent-flow` followed by any prompt to visualize tool calls, messages, and model reasoning in real-time on the canvas
+- Feature: Clickable timeline panel — click anywhere on the execution timeline to seek/scrub to that point in the session
+- Enhancement: Message bubbles now persist 3x longer (30s hold, 3s fade-out) for easier reading
+- Added `.github/copilot-instructions.md` with project guidelines for AI agent productivity
+- Added `.vscode/launch.json` and `tasks.json` for Extension Development Host debugging
+- Chat participant is now sticky — follow-up messages stay in `@agent-flow` context
+
 ## 0.4.7
 
 - Fix: reset button in review mode no longer breaks the extension
