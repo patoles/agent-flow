@@ -16,6 +16,20 @@ function tailPath(filePath: string, segments = 2): string {
   return String(filePath).split('/').slice(-segments).join('/')
 }
 
+/** Extract patch target paths from apply_patch-style input */
+export function extractPatchPaths(patchText: string): string[] {
+  const matches = patchText.matchAll(/^\*\*\* (?:Add|Delete|Update) File: (.+)$/gm)
+  return Array.from(matches, (match) => match[1]).filter(Boolean)
+}
+
+function summarizePatchInput(input: Record<string, unknown>): string {
+  const patchText = String(input.patch || '')
+  const paths = extractPatchPaths(patchText)
+  if (paths.length === 1) return `${tailPath(paths[0])} — patch`
+  if (paths.length > 1) return `${paths.length} files — patch`
+  return 'apply patch'
+}
+
 /** Summarize tool input into a short human-readable string */
 export function summarizeInput(toolName: string, input?: Record<string, unknown>): string {
   if (!input) { return '' }
@@ -47,6 +61,22 @@ export function summarizeInput(toolName: string, input?: Record<string, unknown>
     }
     case 'WebSearch':
       return String(input.query || '').slice(0, ARGS_MAX)
+    case 'Patch':
+      return summarizePatchInput(input).slice(0, ARGS_MAX)
+    case 'Parallel': {
+      const toolUses = input.tool_uses
+      return Array.isArray(toolUses) ? `${toolUses.length} parallel tool calls` : 'parallel tool calls'
+    }
+    case 'wait_agent': {
+      const ids = input.ids
+      return Array.isArray(ids)
+        ? `wait ${ids.length} agent${ids.length === 1 ? '' : 's'}`
+        : 'wait for agent'
+    }
+    case 'send_input':
+      return String(input.message || input.id || '').slice(0, ARGS_MAX)
+    case 'close_agent':
+      return String(input.id || 'close agent').slice(0, ARGS_MAX)
     case 'WebFetch': {
       const url = String(input.url || '')
       try { const u = new URL(url); return u.hostname + u.pathname.slice(0, URL_PATH_MAX) } catch { return url.slice(0, ARGS_MAX) }
@@ -138,6 +168,12 @@ export function extractInputData(toolName: string, input: Record<string, unknown
           url: String(input.url || ''),
           prompt: String(input.prompt || '').slice(0, WEB_FETCH_PROMPT_MAX),
         }
+      case 'Patch': {
+        const paths = extractPatchPaths(String(input.patch || ''))
+        return {
+          file_path: paths[0] || '',
+        }
+      }
       case 'AskUserQuestion': {
         const qs = input.questions as Array<{ question?: string; options?: Array<{ label?: string }> }> | undefined
         return {
@@ -158,6 +194,12 @@ export function extractInputData(toolName: string, input: Record<string, unknown
 /** Extract file path from tool input */
 export function extractFilePath(input?: Record<string, unknown>): string | undefined {
   if (!input) { return undefined }
+  if (typeof input.file_path === 'string') return input.file_path
+  if (typeof input.path === 'string') return input.path
+  if (typeof input.patch === 'string') {
+    const paths = extractPatchPaths(input.patch)
+    return paths.length === 1 ? paths[0] : undefined
+  }
   const raw = input.file_path || input.path
   return typeof raw === 'string' ? raw : undefined
 }

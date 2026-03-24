@@ -4,6 +4,7 @@ import { JsonlEventSource } from './event-source'
 import { HookServer } from './hook-server'
 import { SessionWatcher } from './session-watcher'
 import { AgentEvent, WebviewToExtensionMessage } from './protocol'
+import { CodexSessionWatcher } from './codex-session-watcher'
 import {
   ORCHESTRATOR_NAME, HOOK_SERVER_NOT_STARTED,
   SESSION_ID_DISPLAY, STATUS_MESSAGE_DURATION_MS,
@@ -17,6 +18,7 @@ import {
   ensureHookScript,
 } from './discovery'
 import { createLogger } from './logger'
+import type { AgentRuntimeMode, AgentSessionWatcher } from './session-runtime'
 
 const log = createLogger('Extension')
 
@@ -33,126 +35,13 @@ function filterOrchestratorCompletion(event: AgentEvent): AgentEvent | null {
 
 let eventSource: JsonlEventSource | undefined
 let hookServer: HookServer | undefined
-let sessionWatcher: SessionWatcher | undefined
+let sessionWatcher: AgentSessionWatcher | undefined
+let activeRuntime: AgentRuntimeMode = 'claude'
 
 export async function activate(context: vscode.ExtensionContext) {
   log.info('Extension activated')
 
-  // ─── Start the hook server ──────────────────────────────────────────────
-
-  hookServer = new HookServer()
-  context.subscriptions.push(hookServer)
-
-  let hookPort: number
-  try {
-    hookPort = await hookServer.start()
-  } catch (err) {
-    log.error('Failed to start hook server:', err)
-    hookPort = HOOK_SERVER_NOT_STARTED
-  }
-
-  if (hookPort === HOOK_SERVER_NOT_STARTED) {
-    log.info('Hook server skipped (another instance owns the port) — using session watcher only')
-  } else {
-    log.info(`Hook server running on port ${hookPort}`)
-
-    // Write discovery file so the hook script can find us.
-    // The hook script reads this at invocation time — no port in settings.json.
-    const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-    if (workspace) {
-      ensureHookScript()
-      writeDiscoveryFile(hookPort, workspace)
-      migrateHttpHooks()
-    }
-
-    // Wire hook events to the webview — but only when session watcher isn't active
-    // for that specific session (session watcher reads JSONL transcripts directly)
-    hookServer.onEvent((event) => {
-      const panel = VisualizerPanel.getCurrent()
-      if (!panel || !panel.isReady) { return }
-
-      const eventSessionId = event.sessionId
-      const sessionWatcherHandlesThis = eventSessionId
-        ? sessionWatcher?.isSessionActive(eventSessionId)
-        : sessionWatcher?.isActive()
-
-      if (sessionWatcherHandlesThis) {
-        // Session watcher handles the orchestrator's transcript directly.
-        // Let all non-orchestrator (subagent) events through from the Hook Server,
-        // EXCEPT lifecycle events (spawn/complete) which the session watcher
-        // handles with more accurate names from the transcript/meta files.
-        const agentName = event.payload?.agent ?? event.payload?.name
-        const isOrchestrator = agentName === ORCHESTRATOR_NAME || !agentName
-
-        if (isOrchestrator) {
-          const filtered = filterOrchestratorCompletion(event)
-          if (filtered) panel.sendEvent(filtered)
-          return
-        }
-
-        // Filter subagent lifecycle events — the session watcher (transcript
-        // parser + file watcher) handles these with correct names. Letting
-        // them through from hooks would create duplicate nodes with different
-        // names (hook uses agent_type-id, transcript uses description).
-        const SUBAGENT_LIFECYCLE_EVENTS = ['agent_spawn', 'subagent_dispatch', 'subagent_return', 'agent_complete']
-        if (SUBAGENT_LIFECYCLE_EVENTS.includes(event.type)) return
-
-        // Subagent tool/message events — pass through from Hook Server
-        panel.sendEvent(event)
-        return
-      }
-      panel.sendEvent(event)
-      panel.setConnectionStatus('watching', `Claude Code hooks (:${hookPort})`)
-    })
-  }
-
-  // ─── Start the session watcher (auto-detects active Claude Code sessions) ─
-
-  sessionWatcher = new SessionWatcher()
-  context.subscriptions.push(sessionWatcher)
-
-  sessionWatcher.onEvent((event) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (!panel || !panel.isReady) { return }
-
-    const filtered = filterOrchestratorCompletion(event)
-    if (filtered) panel.sendEvent(filtered)
-  })
-
-  sessionWatcher.onSessionDetected((sessionId) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (panel) {
-      const sessionCount = sessionWatcher?.getActiveSessions().length ?? 0
-      panel.setConnectionStatus('watching', sessionCount > 1
-        ? `${sessionCount} sessions`
-        : `Session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`)
-    }
-    vscode.window.setStatusBarMessage(`Agent Visualizer: watching session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`, STATUS_MESSAGE_DURATION_MS)
-
-  })
-
-  sessionWatcher.onSessionLifecycle((lifecycle) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (!panel) { return }
-    if (lifecycle.type === 'started') {
-      panel.postMessage({
-        type: 'session-started',
-        session: {
-          id: lifecycle.sessionId,
-          label: lifecycle.label,
-          status: 'active' as const,
-          startTime: Date.now(),
-          lastActivityTime: Date.now(),
-        },
-      })
-    } else if (lifecycle.type === 'updated') {
-      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label })
-    } else {
-      panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
-    }
-  })
-
-  sessionWatcher.start()
+  await startRuntime(context)
 
   // ─── Commands ──────────────────────────────────────────────────────────────
 
@@ -160,7 +49,9 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('agentVisualizer.open', () => {
       const panel = VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.One)
       wirePanel(panel)
-      promptHookSetupIfNeeded(context)
+      if (activeRuntime === 'claude') {
+        promptHookSetupIfNeeded(context)
+      }
     }),
   )
 
@@ -168,7 +59,9 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('agentVisualizer.openToSide', () => {
       const panel = VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.Beside)
       wirePanel(panel)
-      promptHookSetupIfNeeded(context)
+      if (activeRuntime === 'claude') {
+        promptHookSetupIfNeeded(context)
+      }
     }),
   )
 
@@ -176,17 +69,20 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('agentVisualizer.connectToAgent', async () => {
       const choice = await vscode.window.showQuickPick(
         [
-          { label: '$(radio-tower) Claude Code Hooks', description: 'Auto-configure hooks for live streaming', value: 'hooks' },
+          { label: '$(radio-tower) Claude Code', description: 'Use Claude transcripts and optional hooks', value: 'claude' },
+          { label: '$(sparkle) Codex Sessions', description: 'Watch local Codex rollout sessions', value: 'codex' },
           { label: '$(file) Watch JSONL File', description: 'Watch a file for agent events', value: 'jsonl' },
           { label: '$(play) Mock Data', description: 'Use built-in demo scenario', value: 'mock' },
         ],
-        { placeHolder: 'Select event source' },
+        { placeHolder: 'Select agent runtime or event source' },
       )
 
       if (!choice) { return }
 
-      if (choice.value === 'hooks') {
-        await configureClaudeHooks()
+      if (choice.value === 'claude') {
+        await switchRuntimeMode(context, 'claude', true)
+      } else if (choice.value === 'codex') {
+        await switchRuntimeMode(context, 'codex')
       } else if (choice.value === 'jsonl') {
         const fileUri = await vscode.window.showOpenDialog({
           canSelectFiles: true,
@@ -210,7 +106,24 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agentVisualizer.configureHooks', async () => {
+      if (activeRuntime !== 'claude') {
+        await switchRuntimeMode(context, 'claude')
+      }
       await configureClaudeHooks()
+    }),
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agentVisualizer.selectRuntime', async () => {
+      const choice = await vscode.window.showQuickPick(
+        [
+          { label: 'Claude Code', value: 'claude' as const },
+          { label: 'Codex', value: 'codex' as const },
+        ],
+        { placeHolder: 'Select the runtime Agent Flow should watch' },
+      )
+      if (!choice) return
+      await switchRuntimeMode(context, choice.value)
     }),
   )
 
@@ -222,6 +135,198 @@ export async function activate(context: vscode.ExtensionContext) {
       wirePanel(panel)
     },
   })
+}
+
+function resolveRuntimeMode(): AgentRuntimeMode {
+  const configured = vscode.workspace.getConfiguration('agentVisualizer').get<string>('runtime', 'claude')
+  return configured === 'codex' ? 'codex' : 'claude'
+}
+
+function currentConnectionSource(): string {
+  if (activeRuntime === 'claude') {
+    if (hookServer && hookServer.getPort() > 0) {
+      return `Claude hooks :${hookServer.getPort()} + session watcher`
+    }
+    return 'Claude session watcher'
+  }
+  return 'Codex session watcher'
+}
+
+function wireSessionWatcherEvents(): void {
+  if (!sessionWatcher) return
+
+  sessionWatcher.onEvent((event) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (!panel || !panel.isReady) { return }
+
+    const filtered = filterOrchestratorCompletion(event)
+    if (filtered) panel.sendEvent(filtered)
+  })
+
+  sessionWatcher.onSessionDetected((sessionId) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (panel) {
+      const sessionCount = sessionWatcher?.getActiveSessions().length ?? 0
+      panel.setConnectionStatus('watching', sessionCount > 1
+        ? `${sessionCount} ${activeRuntime} sessions`
+        : `${activeRuntime} ${sessionId.slice(0, SESSION_ID_DISPLAY)}`)
+    }
+    vscode.window.setStatusBarMessage(
+      `Agent Visualizer: watching ${activeRuntime} session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`,
+      STATUS_MESSAGE_DURATION_MS,
+    )
+  })
+
+  sessionWatcher.onSessionLifecycle((lifecycle) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (!panel) { return }
+    if (lifecycle.type === 'started') {
+      panel.postMessage({
+        type: 'session-started',
+        session: {
+          id: lifecycle.sessionId,
+          label: lifecycle.label,
+          status: 'active' as const,
+          startTime: Date.now(),
+          lastActivityTime: Date.now(),
+        },
+      })
+    } else if (lifecycle.type === 'updated') {
+      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label })
+    } else {
+      panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
+    }
+  })
+}
+
+async function startClaudeRuntime(context: vscode.ExtensionContext): Promise<void> {
+  activeRuntime = 'claude'
+
+  hookServer = new HookServer()
+  context.subscriptions.push(hookServer)
+
+  let hookPort: number
+  try {
+    hookPort = await hookServer.start()
+  } catch (err) {
+    log.error('Failed to start hook server:', err)
+    hookPort = HOOK_SERVER_NOT_STARTED
+  }
+
+  if (hookPort === HOOK_SERVER_NOT_STARTED) {
+    log.info('Hook server skipped (another instance owns the port) — using session watcher only')
+  } else {
+    log.info(`Hook server running on port ${hookPort}`)
+
+    const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+    if (workspace) {
+      ensureHookScript()
+      writeDiscoveryFile(hookPort, workspace)
+      migrateHttpHooks()
+    }
+
+    hookServer.onEvent((event) => {
+      const panel = VisualizerPanel.getCurrent()
+      if (!panel || !panel.isReady) { return }
+
+      const eventSessionId = event.sessionId
+      const sessionWatcherHandlesThis = eventSessionId
+        ? sessionWatcher?.isSessionActive(eventSessionId)
+        : sessionWatcher?.isActive()
+
+      if (sessionWatcherHandlesThis) {
+        const agentName = event.payload?.agent ?? event.payload?.name
+        const isOrchestrator = agentName === ORCHESTRATOR_NAME || !agentName
+
+        if (isOrchestrator) {
+          const filtered = filterOrchestratorCompletion(event)
+          if (filtered) panel.sendEvent(filtered)
+          return
+        }
+
+        const subagentLifecycleEvents = ['agent_spawn', 'subagent_dispatch', 'subagent_return', 'agent_complete']
+        if (subagentLifecycleEvents.includes(event.type)) return
+
+        panel.sendEvent(event)
+        return
+      }
+
+      panel.sendEvent(event)
+      panel.setConnectionStatus('watching', `Claude hooks (:${hookPort})`)
+    })
+  }
+
+  sessionWatcher = new SessionWatcher()
+  context.subscriptions.push(sessionWatcher)
+  wireSessionWatcherEvents()
+  sessionWatcher.start()
+}
+
+function startCodexRuntime(context: vscode.ExtensionContext): void {
+  activeRuntime = 'codex'
+  sessionWatcher = new CodexSessionWatcher()
+  context.subscriptions.push(sessionWatcher)
+  wireSessionWatcherEvents()
+  sessionWatcher.start()
+}
+
+async function startRuntime(context: vscode.ExtensionContext): Promise<void> {
+  const runtime = resolveRuntimeMode()
+  if (runtime === 'codex') {
+    startCodexRuntime(context)
+  } else {
+    await startClaudeRuntime(context)
+  }
+}
+
+function disposeRuntime(): void {
+  const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  if (workspace) {
+    removeDiscoveryFile(workspace)
+  }
+
+  if (hookServer) {
+    hookServer.dispose()
+    hookServer = undefined
+  }
+  if (sessionWatcher) {
+    sessionWatcher.dispose()
+    sessionWatcher = undefined
+  }
+}
+
+async function restartRuntime(context: vscode.ExtensionContext): Promise<void> {
+  disposeRuntime()
+  await startRuntime(context)
+
+  const panel = VisualizerPanel.getCurrent()
+  if (!panel || !panel.isReady) return
+
+  panel.postMessage({ type: 'reset', reason: 'runtime-switched' })
+  const sessions = sessionWatcher?.getActiveSessions() ?? []
+  if (sessions.length > 0) {
+    panel.postMessage({ type: 'session-list', sessions })
+    sessionWatcher?.replaySessionStart(sessions.map((session) => session.id))
+  }
+  panel.setConnectionStatus('watching', currentConnectionSource())
+}
+
+async function switchRuntimeMode(
+  context: vscode.ExtensionContext,
+  mode: AgentRuntimeMode,
+  configureHooksAfter = false,
+): Promise<void> {
+  const target = vscode.workspace.workspaceFolders?.length
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global
+  await vscode.workspace.getConfiguration('agentVisualizer').update('runtime', mode, target)
+  await restartRuntime(context)
+
+  if (mode === 'claude' && configureHooksAfter) {
+    await configureClaudeHooks()
+  } else if (mode === 'codex') {
+    vscode.window.setStatusBarMessage('Agent Flow: watching Codex sessions', STATUS_MESSAGE_DURATION_MS)
+  }
 }
 
 function wirePanel(panel: VisualizerPanel): void {
@@ -252,11 +357,7 @@ function wirePanel(panel: VisualizerPanel): void {
             sessionWatcher.replaySessionStart(sessions.map(s => s.id))
           }
         }
-        if (hookServer && hookServer.getPort() > 0) {
-          panel.setConnectionStatus('watching', `Hooks :${hookServer.getPort()} + session watcher`)
-        } else {
-          panel.setConnectionStatus('watching', 'Session watcher')
-        }
+        panel.setConnectionStatus('watching', currentConnectionSource())
         break
 
       case 'request-connect':
@@ -338,24 +439,5 @@ async function handleOpenFile(filePath: string, line?: number): Promise<void> {
 
 export function deactivate(): void {
   disconnectEventSource()
-
-  // Remove our discovery file so the hook script won't forward to a dead port.
-  // Hook entries in settings.json are left intact — the command is stable
-  // (node ~/.claude/agent-flow/hook.js) and the script handles dead instances
-  // gracefully via PID checks. This avoids breaking multi-window setups and
-  // means hooks survive VS Code restarts without reconfiguration.
-  const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-  if (workspace) {
-    removeDiscoveryFile(workspace)
-  }
-
-  if (hookServer) {
-    hookServer.dispose()
-    hookServer = undefined
-  }
-  if (sessionWatcher) {
-    sessionWatcher.dispose()
-    sessionWatcher = undefined
-  }
+  disposeRuntime()
 }
-

@@ -1,7 +1,7 @@
 {
   "name": "agent-flow",
   "displayName": "Agent Flow",
-  "description": "Real-time visualization of Claude Code agent orchestration",
+  "description": "Real-time visualization of coding agent orchestration",
   "version": "0.4.7",
   "publisher": "simon-p",
   "license": "Apache-2.0",
@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Visualization", "Other"],
-  "keywords": ["llm", "agent", "claude", "ai", "visualization", "orchestration"],
+  "keywords": ["llm", "agent", "claude", "codex", "ai", "visualization", "orchestration"],
   "activationEvents": [
     "onWebviewPanel:agentVisualizer"
   ],
@@ -33,12 +33,17 @@
       },
       {
         "command": "agentVisualizer.connectToAgent",
-        "title": "Connect to Running Agent",
+        "title": "Connect to Agent Sessions",
         "category": "Agent Flow"
       },
       {
         "command": "agentVisualizer.configureHooks",
         "title": "Configure Claude Code Hooks",
+        "category": "Agent Flow"
+      },
+      {
+        "command": "agentVisualizer.selectRuntime",
+        "title": "Select Agent Runtime",
         "category": "Agent Flow"
       }
     ],
@@ -56,6 +61,12 @@
           "type": "number",
           "default": 0,
           "description": "Port for the development server. Set to 0 (default) for production mode, or 3002 for development."
+        },
+        "agentVisualizer.runtime": {
+          "type": "string",
+          "default": "claude",
+          "enum": ["claude", "codex"],
+          "description": "Which local agent runtime Agent Flow should watch."
         },
         "agentVisualizer.eventLogPath": {
           "type": "string",
@@ -78,6 +89,8 @@
     "watch": "node esbuild.js --watch",
     "package": "vsce package",
     "lint": "tsc --noEmit",
+    "test": "npm run test:codex",
+    "test:codex": "tsc -p tsconfig.test.json && node --test .test-dist/test/**/*.test.js",
     "vscode:uninstall": "node scripts/uninstall.js"
   },
   "devDependencies": {

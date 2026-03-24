@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add experimental Codex session watching alongside the existing Claude Code workflow
+- Add a runtime selector so users can switch between Claude Code and Codex session discovery
+- Add Codex rollout parser tests and UI runtime branding updates
+- Known limitation: Codex automatic context compaction is not yet visualized correctly
+
 ## 0.4.7
 
 - Fix: reset button in review mode no longer breaks the extension

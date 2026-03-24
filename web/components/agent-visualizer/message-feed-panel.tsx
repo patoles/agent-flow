@@ -3,12 +3,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Agent, Z, type AgentState } from '@/lib/agent-types'
 import { COLORS, ROLE_COLORS, getStateColor } from '@/lib/colors'
+import { getMessageRoleLabel, type AssistantBrandLabel } from '@/lib/runtime-brand'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { useClickOutside } from '@/hooks/use-click-outside'
 
 interface MessageFeedPanelProps {
   conversations: Map<string, ConversationMessage[]>
   agents: Map<string, Agent>
+  assistantLabel: AssistantBrandLabel
   onAgentClick: (agentId: string | null) => void
   selectedAgentId: string | null
 }
@@ -26,6 +28,7 @@ const AUTO_SCROLL_THRESHOLD = 60
 export function MessageFeedPanel({
   conversations,
   agents,
+  assistantLabel,
   onAgentClick,
   selectedAgentId,
 }: MessageFeedPanelProps) {
@@ -280,6 +283,7 @@ export function MessageFeedPanel({
                 message={msg}
                 agentId={msg.agentId}
                 agentName={agents.get(msg.agentId)?.name ?? msg.agentId}
+                assistantLabel={assistantLabel}
                 showAgent={activeTab === 'all'}
                 isSelected={selectedAgentId === msg.agentId}
                 onClick={() => { onAgentClick(msg.agentId); setExpanded(false) }}
@@ -324,10 +328,11 @@ function TabButton({ label, active, onClick, color, hasUnread }: {
 
 // ── Message Row ──
 
-function MessageRow({ message, agentId, agentName, showAgent, isSelected, onClick }: {
+function MessageRow({ message, agentId, agentName, assistantLabel, showAgent, isSelected, onClick }: {
   message: ConversationMessage
   agentId: string
   agentName: string
+  assistantLabel: AssistantBrandLabel
   showAgent: boolean
   isSelected: boolean
   onClick: () => void
@@ -349,7 +354,7 @@ function MessageRow({ message, agentId, agentName, showAgent, isSelected, onClic
       {/* Header row */}
       <div className="flex items-center gap-1.5 mb-0.5">
         <span className="text-[9px] font-mono font-semibold" style={{ color: role.text + '90' }}>
-          {role.label}
+          {getMessageRoleLabel(message.type, assistantLabel)}
         </span>
         {showAgent && (
           <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}>

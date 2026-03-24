@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { Agent, ToolCallNode, Particle, Edge, Discovery, DepthParticle } from '@/lib/agent-types'
 import { getStateColor } from '@/lib/colors'
+import type { AssistantBrandLabel } from '@/lib/runtime-brand'
 import { ANIM_SPEED } from '@/lib/canvas-constants'
 import { BloomRenderer } from './bloom-renderer'
 import { createDepthParticles, updateDepthParticles, drawBackground } from './background-layer'
@@ -44,12 +45,14 @@ interface CanvasProps {
   selectedDiscoveryId?: string | null
   currentTime?: number
   showCostOverlay?: boolean
+  assistantLabel: AssistantBrandLabel
 }
 
 export function AgentCanvas({
   agents, toolCalls, particles, edges, discoveries,
   selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, currentTime: simTime, showCostOverlay,
+  assistantLabel,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -223,7 +226,7 @@ export function AgentCanvas({
     drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
     drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
     drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current)
-    drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
+    drawMessageBubblesWorld(ctx, agents, simTimeRef.current, assistantLabel)
     if (showCostOverlay) drawCostLabels(ctx, agents, toolCalls)
     drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
     drawEffects(ctx, effectsRef.current)

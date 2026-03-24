@@ -2,6 +2,7 @@
 
 import { CARD, Z, type AgentState } from '@/lib/agent-types'
 import { COLORS, getStateColor } from '@/lib/colors'
+import type { AssistantBrandLabel } from '@/lib/runtime-brand'
 import { TranscriptMessage } from './transcript-message'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { PanelHeader, SlidingPanel, stopPropagationHandlers } from './shared-ui'
@@ -12,6 +13,7 @@ interface ChatPanelProps {
   agentName: string
   agentState: AgentState
   conversation: ConversationMessage[]
+  assistantLabel: AssistantBrandLabel
   onClose: () => void
 }
 
@@ -20,6 +22,7 @@ export function AgentChatPanel({
   agentName,
   agentState,
   conversation,
+  assistantLabel,
   onClose,
 }: ChatPanelProps) {
   const { ref: logRef } = useAutoScroll(conversation.length, visible)
@@ -62,7 +65,7 @@ export function AgentChatPanel({
             </div>
           ) : (
             conversation.map((msg) => (
-              <TranscriptMessage key={msg.id} message={msg} />
+              <TranscriptMessage key={msg.id} message={msg} assistantLabel={assistantLabel} />
             ))
           )}
         </div>

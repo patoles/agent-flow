@@ -7,6 +7,7 @@ import { SimulationEvent } from '@/lib/agent-types'
 interface BridgeHookResult {
   isVSCode: boolean
   connectionStatus: ConnectionStatus
+  connectionSource: string
   /** Events received from VS Code extension, converted to SimulationEvent format */
   pendingEvents: readonly SimulationEvent[]
   /** Call after consuming events to clear the queue */
@@ -42,6 +43,7 @@ interface BridgeHookResult {
 export function useVSCodeBridge(): BridgeHookResult {
   const [isVSCode, setIsVSCode] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
+  const [connectionSource, setConnectionSource] = useState('')
   const [useMockData, setUseMockData] = useState(true)
   const pendingEventsRef = useRef<SimulationEvent[]>([])
   const [, setEventVersion] = useState(0) // trigger re-render on new events
@@ -112,8 +114,9 @@ export function useVSCodeBridge(): BridgeHookResult {
       }
     })
 
-    const unsubStatus = bridge.onStatus((status) => {
+    const unsubStatus = bridge.onStatus((status, source) => {
       setConnectionStatus(status)
+      setConnectionSource(source)
     })
 
     const unsubConfig = bridge.onConfig((config) => {
@@ -249,6 +252,7 @@ export function useVSCodeBridge(): BridgeHookResult {
   return {
     isVSCode,
     connectionStatus,
+    connectionSource,
     pendingEvents: pendingEventsRef.current,
     consumeEvents,
     useMockData,

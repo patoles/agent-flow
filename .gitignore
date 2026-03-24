@@ -7,6 +7,7 @@ dist
 
 # Auto-generated
 extension/README.md
+extension/.test-dist/
 next-env.d.ts
 *.tsbuildinfo
 

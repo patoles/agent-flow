@@ -19,6 +19,7 @@ import { OpenFileProvider } from "./tool-content-renderer"
 import { stopPropagationHandlers } from "./shared-ui"
 import { TimelineEvent, TIMING } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
+import { getAssistantBrandLabel } from "@/lib/runtime-brand"
 
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
@@ -27,6 +28,10 @@ import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
   const bridge = useVSCodeBridge()
+  const assistantLabel = useMemo(
+    () => getAssistantBrandLabel(bridge.connectionSource),
+    [bridge.connectionSource],
+  )
 
   const {
     agents,
@@ -249,12 +254,14 @@ export function AgentVisualizer() {
         selectedDiscoveryId={selection.selectedDiscoveryId}
         currentTime={currentTime}
         showCostOverlay={showCostOverlay}
+        assistantLabel={assistantLabel}
       />
 
       {/* Message feed panel (top-left) */}
       <MessageFeedPanel
         conversations={conversations}
         agents={agents}
+        assistantLabel={assistantLabel}
         onAgentClick={selection.handleAgentClick}
         selectedAgentId={selection.selectedAgentId}
       />
@@ -297,6 +304,7 @@ export function AgentVisualizer() {
         agentName={selectedAgent?.name ?? ''}
         agentState={selectedAgent?.state ?? 'idle'}
         conversation={selectedConversation}
+        assistantLabel={assistantLabel}
         onClose={selection.clearAgent}
       />
 
@@ -345,6 +353,7 @@ export function AgentVisualizer() {
       <SessionTranscriptPanel
         visible={showTranscript}
         conversation={sessionConversation}
+        assistantLabel={assistantLabel}
         onClose={() => setShowTranscript(false)}
       />
 

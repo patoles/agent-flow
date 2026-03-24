@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState } from 'react'
 import { Z, CARD } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
+import type { AssistantBrandLabel } from '@/lib/runtime-brand'
 import { TranscriptMessage } from './transcript-message'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { CloseButton, SlidingPanel, stopPropagationHandlers } from './shared-ui'
@@ -13,12 +14,14 @@ import { useAutoScroll } from '@/hooks/use-auto-scroll'
 interface TranscriptPanelProps {
   visible: boolean
   conversation: ConversationMessage[]
+  assistantLabel: AssistantBrandLabel
   onClose: () => void
 }
 
 export function SessionTranscriptPanel({
   visible,
   conversation,
+  assistantLabel,
   onClose,
 }: TranscriptPanelProps) {
   const [searchQuery, setSearchQuery] = useState('')
@@ -121,7 +124,7 @@ export function SessionTranscriptPanel({
             </div>
           ) : (
             filteredConversation.map((msg) => (
-              <TranscriptMessage key={msg.id} message={msg} searchQuery={searchQuery} />
+              <TranscriptMessage key={msg.id} message={msg} searchQuery={searchQuery} assistantLabel={assistantLabel} />
             ))
           )}
 
