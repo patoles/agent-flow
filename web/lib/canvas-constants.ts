@@ -31,11 +31,11 @@ export const MOCK_END_BUFFER_S = 8
 // ─── Canvas drawing constants ────────────────────────────────────────────────
 
 /** Seconds a message bubble stays fully visible */
-export const BUBBLE_HOLD = 10
+export const BUBBLE_HOLD = 30
 /** Seconds for bubble fade-in animation */
 export const BUBBLE_FADE_IN = 0.3
 /** Seconds for bubble fade-out animation */
-export const BUBBLE_FADE_OUT = 1.5
+export const BUBBLE_FADE_OUT = 3
 /** Maximum width (px) of a message bubble */
 export const BUBBLE_MAX_W = 220
 /** Vertical gap (px) between stacked bubbles */
@@ -59,7 +59,7 @@ export const DISCOVERY_HOLD_S = 8
 /** Speed multiplier for discovery lerp toward target position */
 export const DISCOVERY_LERP_SPEED = 3
 /** Seconds a message bubble is considered visible (for pruning) */
-export const BUBBLE_VISIBLE_S = 12
+export const BUBBLE_VISIBLE_S = 35
 
 
 // ─── Animation speed multipliers ─────────────────────────────────────────────
