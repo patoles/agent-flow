@@ -166,8 +166,18 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     const deltaTime = Math.min((timestamp - lastTimeRef.current) / 1000, ANIM_SPEED.maxDeltaTime)
     lastTimeRef.current = timestamp
 
+    // Snapshot and consume external events OUTSIDE setState to avoid
+    // React strict mode double-invocation clearing them on the first call
+    let capturedEvents: SimulationEvent[] | null = null
+    if (externalEvents && externalEvents.length > 0 && !useMockData) {
+      capturedEvents = externalEvents.slice()
+      onExternalEventsConsumed?.()
+    }
+
     setState(prev => {
-      if (!prev.isPlaying) return prev
+      if (!prev.isPlaying) {
+        return prev
+      }
 
       let newTime = prev.currentTime + deltaTime * prev.speed
       let maxT = Math.max(prev.maxTimeReached, newTime)
@@ -198,27 +208,16 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
         }
       }
 
-      // Process NEW external events (from VS Code bridge)
-      // Copy and clear immediately to prevent stale closures from
-      // reprocessing the same events across multiple animation frames
-      if (externalEvents && externalEvents.length > 0) {
-        const eventsToProcess = externalEvents.slice()
-        onExternalEventsConsumed?.()
-        for (const event of eventsToProcess) {
-          // Filter by session if specified — use ref so we always read the
-          // latest value even if the animate closure hasn't been recreated yet.
-          // The ref is also updated synchronously via onSessionFilterChange callback
-          // so it's current even before React re-renders.
+      // Process captured external events (snapshotted outside setState
+      // to avoid React strict mode double-invocation issues)
+      if (capturedEvents) {
+        for (const event of capturedEvents) {
           const activeFilter = sessionFilterRef.current
           if (activeFilter && event.sessionId && event.sessionId !== activeFilter) {
             continue
           }
-          // Clamp event time to at least the current sim time so that
-          // bubbles/effects created by this event appear fresh, not pre-aged
           const eventTime = Math.max(event.time || newTime, newTime)
           const timedEvent = { ...event, time: eventTime }
-          // Advance currentTime so processEvent sees correct timestamps
-          // (critical for session-switch replay where many events arrive at once)
           currentState = { ...currentState, currentTime: eventTime }
           currentState = processEventWithContext(timedEvent, currentState)
           newEvents.push(timedEvent)
