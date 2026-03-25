@@ -164,4 +164,11 @@ class EventHubClient {
   }
 }
 
-export const eventHubClient = typeof window !== 'undefined' ? new EventHubClient() : null
+/** Create a new client instance. Call connect() to start. */
+export function createEventHubClient(url?: string) {
+  if (typeof window === 'undefined') return null
+  return new EventHubClient(url)
+}
+
+/** @deprecated Use createEventHubClient() instead */
+export const eventHubClient = createEventHubClient()

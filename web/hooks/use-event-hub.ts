@@ -1,15 +1,24 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { eventHubClient, type HubSessionInfo } from '@/lib/event-hub-client'
+import { createEventHubClient, type HubSessionInfo } from '@/lib/event-hub-client'
 import type { SimulationEvent } from '@/lib/agent-types'
 import type { SessionInfo, ConnectionStatus } from '@/lib/vscode-bridge'
 
+interface UseEventHubOptions {
+  /** Set to true to activate the hub connection (default: false) */
+  enabled?: boolean
+  /** Custom WebSocket URL (default: ws://localhost:7850/ws) */
+  url?: string
+}
+
 /**
  * React hook that connects to the agent-viz event hub via WebSocket.
+ * Only connects when enabled=true (triggered by ?hub query param).
  * Returns the same shape as useVSCodeBridge so useAgentSimulation works unchanged.
  */
-export function useEventHub() {
+export function useEventHub(options: UseEventHubOptions = {}) {
+  const { enabled = false, url } = options
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const pendingEventsRef = useRef<SimulationEvent[]>([])
   const [, setEventVersion] = useState(0)
@@ -19,10 +28,14 @@ export function useEventHub() {
   const selectedSessionIdRef = useRef<string | null>(null)
   const sessionEventsRef = useRef<Map<string, SimulationEvent[]>>(new Map())
   const [sessionsWithActivity, setSessionsWithActivity] = useState<Set<string>>(new Set())
+  const clientRef = useRef<ReturnType<typeof createEventHubClient>>(null)
 
   useEffect(() => {
-    const client = eventHubClient
+    if (!enabled) return
+
+    const client = createEventHubClient(url)
     if (!client) return
+    clientRef.current = client
 
     client.connect()
 
@@ -116,8 +129,10 @@ export function useEventHub() {
       unsubEvent()
       unsubSession()
       client.dispose()
+      clientRef.current = null
     }
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- url is stable from query param
+  }, [enabled, url])
 
   const consumeEvents = useCallback(() => {
     pendingEventsRef.current.length = 0
@@ -133,7 +148,7 @@ export function useEventHub() {
         next.delete(sessionId)
         return next
       })
-      eventHubClient?.selectSession(sessionId)
+      clientRef.current?.selectSession(sessionId)
     }
   }, [])
 

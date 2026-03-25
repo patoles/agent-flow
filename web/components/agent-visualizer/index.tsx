@@ -28,9 +28,13 @@ import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
   const vscodeBridge = useVSCodeBridge()
-  const hubBridge = useEventHub()
-  // Prefer event hub when connected; fall back to VS Code bridge otherwise
-  const bridge = hubBridge.connectionStatus === 'connected' ? hubBridge : vscodeBridge
+  // Standalone modes: ?mode=openclaw or ?mode=claude-code connects to an event hub
+  const mode = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('mode')
+    : null
+  const hubEnabled = mode === 'openclaw' || mode === 'claude-code'
+  const hubBridge = useEventHub({ enabled: hubEnabled })
+  const bridge = hubEnabled ? hubBridge : vscodeBridge
 
   const {
     agents,
