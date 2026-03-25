@@ -19,8 +19,10 @@ interface BridgeHookResult {
   sessions: SessionInfo[]
   /** Currently selected session ID */
   selectedSessionId: string | null
-  /** Select a session to view. Optional fromIndex to skip already-processed events. */
-  selectSession: (sessionId: string | null, fromIndex?: number) => void
+  /** Select a session to view (does not flush events — call flushSessionEvents after state swap). */
+  selectSession: (sessionId: string | null) => void
+  /** Flush buffered events for a session into pending. Call from useLayoutEffect after state swap. */
+  flushSessionEvents: (sessionId: string, fromIndex?: number) => void
   /** Get the current event count for a session (for save/restore) */
   getSessionEventCount: (sessionId: string) => number
   /** Ref to the currently selected session ID — updated synchronously, not via React state */
@@ -51,6 +53,9 @@ export function useVSCodeBridge(): BridgeHookResult {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const selectedSessionIdRef = useRef<string | null>(null)
   const sessionEventsRef = useRef<Map<string, SimulationEvent[]>>(new Map())
+  /** True while a session switch is pending (between auto-select and useLayoutEffect).
+   *  Prevents the animation frame from processing events in the wrong simulation context. */
+  const sessionSwitchPendingRef = useRef(false)
   const [sessionsWithActivity, setSessionsWithActivity] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -81,9 +86,11 @@ export function useVSCodeBridge(): BridgeHookResult {
         sessionEventsRef.current.set(event.sessionId, buf)
       }
 
-      // Deliver to pending if session matches (ref is always current)
+      // Deliver to pending if session matches (ref is always current).
+      // Skip if a session switch is pending — useLayoutEffect will flush
+      // from the session buffer once the simulation state is swapped.
       const selected = selectedSessionIdRef.current
-      if (selected && event.sessionId === selected) {
+      if (selected && event.sessionId === selected && !sessionSwitchPendingRef.current) {
         pendingEventsRef.current.push(simEvent)
         setEventVersion(v => v + 1)
       } else if (event.sessionId && event.sessionId !== selected) {
@@ -137,7 +144,8 @@ export function useVSCodeBridge(): BridgeHookResult {
       if (type === 'list') {
         const sessionList = data as SessionInfo[]
         setSessions(sessionList)
-        // Auto-select: prefer active sessions, then most recently active
+        // Auto-select: prefer active sessions, then most recently active.
+        // Only set selection — useLayoutEffect handles flushing events.
         if (!selectedSessionIdRef.current && sessionList.length > 0) {
           const sorted = [...sessionList].sort((a, b) => {
             const aActive = a.status === 'active' ? 1 : 0
@@ -146,15 +154,10 @@ export function useVSCodeBridge(): BridgeHookResult {
             return b.lastActivityTime - a.lastActivityTime
           })
           const autoId = sorted[0].id
+          sessionSwitchPendingRef.current = true
+          pendingEventsRef.current.length = 0
           selectedSessionIdRef.current = autoId
           setSelectedSessionId(autoId)
-          // Flush any events already buffered for this session
-          const buffered = sessionEventsRef.current.get(autoId)
-          if (buffered && buffered.length > 0) {
-            pendingEventsRef.current.length = 0
-            pendingEventsRef.current.push(...buffered)
-            setEventVersion(v => v + 1)
-          }
         }
       } else if (type === 'started') {
         const session = data as SessionInfo
@@ -168,7 +171,11 @@ export function useVSCodeBridge(): BridgeHookResult {
           }
           return [...prev, session]
         })
-        // Auto-select newly started session
+        // Auto-select newly started session.
+        // Set switch-pending flag to prevent the animation frame from processing
+        // events in the wrong simulation state before useLayoutEffect swaps it.
+        sessionSwitchPendingRef.current = true
+        pendingEventsRef.current.length = 0
         selectedSessionIdRef.current = session.id
         setSelectedSessionId(session.id)
       } else if (type === 'updated') {
@@ -199,17 +206,15 @@ export function useVSCodeBridge(): BridgeHookResult {
     pendingEventsRef.current.length = 0
   }, [])
 
-  const selectSession = useCallback((sessionId: string | null, fromIndex = 0) => {
+  /** Switch session selection. Does NOT flush events — call flushSessionEvents
+   *  from useLayoutEffect after the simulation state has been saved/swapped. */
+  const selectSession = useCallback((sessionId: string | null) => {
+    // Block event delivery to pending until the simulation state is swapped
+    sessionSwitchPendingRef.current = true
+    pendingEventsRef.current.length = 0
     selectedSessionIdRef.current = sessionId
     setSelectedSessionId(sessionId)
     if (sessionId) {
-      // Flush buffered events for the new session into pending
-      // Clear in-place then push to preserve array identity for stale closures
-      const buffered = sessionEventsRef.current.get(sessionId) || []
-      pendingEventsRef.current.length = 0
-      pendingEventsRef.current.push(...buffered.slice(fromIndex))
-      setEventVersion(v => v + 1)
-      // Clear activity indicator for selected session
       setSessionsWithActivity(prev => {
         if (!prev.has(sessionId)) return prev
         const next = new Set(prev)
@@ -217,6 +222,16 @@ export function useVSCodeBridge(): BridgeHookResult {
         return next
       })
     }
+  }, [])
+
+  /** Flush buffered events for the selected session into pending.
+   *  Must be called from useLayoutEffect AFTER simulation state is saved/swapped. */
+  const flushSessionEvents = useCallback((sessionId: string, fromIndex = 0) => {
+    sessionSwitchPendingRef.current = false
+    const buffered = sessionEventsRef.current.get(sessionId) || []
+    pendingEventsRef.current.length = 0
+    pendingEventsRef.current.push(...buffered.slice(fromIndex))
+    setEventVersion(v => v + 1)
   }, [])
 
   const getSessionEventCount = useCallback((sessionId: string): number => {
@@ -254,6 +269,7 @@ export function useVSCodeBridge(): BridgeHookResult {
     selectedSessionId,
     selectedSessionIdRef,
     selectSession,
+    flushSessionEvents,
     getSessionEventCount,
     sessionsWithActivity,
     removeSession,

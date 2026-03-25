@@ -101,22 +101,21 @@ export function AgentVisualizer() {
         })
       }
 
-      // Restore or cold-start the incoming session
+      // Restore or cold-start the incoming session, then flush events.
+      // Flushing happens HERE (after state swap) to prevent the animation
+      // frame from processing events in the wrong simulation context.
       const cached = sessionCacheRef.current.get(bridge.selectedSessionId)
       if (cached) {
-        // Restore cached state + flush only events that arrived while away
         restoreSnapshot(cached.snapshot)
-        bridge.selectSession(bridge.selectedSessionId, cached.eventCount)
+        bridge.flushSessionEvents(bridge.selectedSessionId, cached.eventCount)
       } else {
-        // New session — restart and flush any events that arrived before
-        // session-started (e.g. first user message buffered in sessionEventsRef).
         restart()
-        bridge.selectSession(bridge.selectedSessionId)
+        bridge.flushSessionEvents(bridge.selectedSessionId)
       }
 
       prevSelectedRef.current = bridge.selectedSessionId
     }
-  }, [bridge.selectedSessionId, restart, bridge.selectSession, saveSnapshot, restoreSnapshot, bridge.getSessionEventCount])
+  }, [bridge.selectedSessionId, restart, bridge.flushSessionEvents, saveSnapshot, restoreSnapshot, bridge.getSessionEventCount])
 
   // Timeline events
   const timelineEvents = useMemo((): TimelineEvent[] => {
