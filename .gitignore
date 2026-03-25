@@ -16,5 +16,7 @@ extension/.vscode/
 # Claude Code
 .claude/
 
-# Subdirectory lock files (project uses pnpm)
+# Subdirectory lock files (project uses pnpm workspace)
 extension/package-lock.json
+
+.DS_Store
