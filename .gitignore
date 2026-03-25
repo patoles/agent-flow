@@ -12,6 +12,10 @@ next-env.d.ts
 
 # Local IDE config
 extension/.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
 
 # Claude Code
 .claude/
