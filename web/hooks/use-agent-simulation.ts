@@ -185,6 +185,14 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     const deltaTime = Math.min((timestamp - lastTimeRef.current) / 1000, ANIM_SPEED.maxDeltaTime)
     lastTimeRef.current = timestamp
 
+    // Snapshot and consume external events OUTSIDE the main processing
+    // to avoid React strict mode double-invocation clearing them
+    let capturedEvents: SimulationEvent[] | null = null
+    if (externalEvents && externalEvents.length > 0 && !useMockData) {
+      capturedEvents = externalEvents.slice()
+      onExternalEventsConsumed?.()
+    }
+
     const prev = frameRef.current
     if (!prev.isPlaying) {
       animationRef.current = requestAnimationFrame(animateRef.current)
@@ -214,11 +222,10 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
       }
     }
 
-    // Process external events (from VS Code bridge)
-    if (externalEvents && externalEvents.length > 0) {
-      const eventsToProcess = externalEvents.slice()
-      onExternalEventsConsumed?.()
-      for (const event of eventsToProcess) {
+    // Process captured external events (snapshotted outside the main
+    // processing to avoid React strict mode double-invocation issues)
+    if (capturedEvents) {
+      for (const event of capturedEvents) {
         const activeFilter = sessionFilterRef.current
         if (activeFilter && event.sessionId && event.sessionId !== activeFilter) {
           continue
@@ -229,6 +236,7 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
         currentState = processEventWithContext(timedEvent, currentState)
         newEvents.push(timedEvent)
       }
+      // Sync simulation clock to latest event so active state renders correctly
       newTime = Math.max(newTime, currentState.currentTime)
       maxT = Math.max(maxT, newTime)
     }
