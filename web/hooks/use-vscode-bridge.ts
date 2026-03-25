@@ -44,7 +44,9 @@ interface BridgeHookResult {
 export function useVSCodeBridge(): BridgeHookResult {
   const [isVSCode, setIsVSCode] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
-  const [useMockData, setUseMockData] = useState(true)
+  const [useMockData, setUseMockData] = useState(
+    process.env.NEXT_PUBLIC_DEMO !== '0'
+  )
   const pendingEventsRef = useRef<SimulationEvent[]>([])
   const [, setEventVersion] = useState(0) // trigger re-render on new events
 
@@ -57,6 +59,40 @@ export function useVSCodeBridge(): BridgeHookResult {
    *  Prevents the animation frame from processing events in the wrong simulation context. */
   const sessionSwitchPendingRef = useRef(false)
   const [sessionsWithActivity, setSessionsWithActivity] = useState<Set<string>>(new Set())
+
+  // Connect to standalone dev relay server via SSE when not in VS Code
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const bridge = vscodeBridge
+    if (!bridge) return
+
+    // Skip in VS Code — extension handles events via postMessage
+    if (bridge.isVSCode) return
+
+    // Only connect in development mode without demo
+    if (process.env.NODE_ENV !== 'development' || process.env.NEXT_PUBLIC_DEMO !== '0') return
+
+    const relayPort = process.env.NEXT_PUBLIC_RELAY_PORT || '3001'
+    const es = new EventSource(`http://127.0.0.1:${relayPort}/events`)
+
+    es.onopen = () => {
+      setConnectionStatus('connected')
+      setUseMockData(false)
+    }
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        window.postMessage(data, '*')
+      } catch {}
+    }
+    es.onerror = () => {
+      setConnectionStatus('disconnected')
+    }
+
+    return () => {
+      es.close()
+    }
+  }, [])
 
   useEffect(() => {
     const bridge = vscodeBridge

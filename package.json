@@ -1,0 +1,19 @@
+{
+  "private": true,
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "dev": "NEXT_PUBLIC_DEMO=0 concurrently -n relay,web -c blue,green \"pnpm run dev:relay\" \"pnpm run dev:web\"",
+    "dev:relay": "node scripts/build-relay.js && node scripts/.dev-relay.js",
+    "dev:demo": "NEXT_PUBLIC_DEMO=1 pnpm run dev:web",
+    "dev:web": "pnpm --filter agent-flow-web run dev",
+    "dev:extension": "pnpm --filter agent-flow run watch",
+    "build:extension": "pnpm --filter agent-flow run build",
+    "build:web": "pnpm --filter agent-flow-web run build",
+    "build:webview": "pnpm --filter agent-flow-web run build:webview",
+    "build:all": "pnpm run build:webview && pnpm run build:extension"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.20.2"
+  }
+}

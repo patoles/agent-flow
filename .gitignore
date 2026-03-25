@@ -7,6 +7,8 @@ dist
 
 # Auto-generated
 extension/README.md
+scripts/.dev-relay.js
+scripts/.dev-relay.js.map
 next-env.d.ts
 *.tsbuildinfo
 
