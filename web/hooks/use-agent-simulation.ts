@@ -91,7 +91,16 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
 
     sim.nodes(nodes)
     const linkForce = sim.force('link') as ReturnType<typeof forceLink> | undefined
-    if (linkForce) linkForce.links(links)
+    if (linkForce) {
+      // Filter out links whose source/target nodes aren't in the current nodes set
+      // to prevent d3-force "node not found" errors when events arrive out of order
+      const nodeIds = new Set(nodes.map(n => n.id))
+      const safeLinks = links.filter(l =>
+        nodeIds.has(typeof l.source === 'object' ? (l.source as ForceNode).id : l.source as string) &&
+        nodeIds.has(typeof l.target === 'object' ? (l.target as ForceNode).id : l.target as string)
+      )
+      linkForce.links(safeLinks)
+    }
     sim.alpha(0.3).restart()
     for (let i = 0; i < 15; i++) sim.tick()
     sim.stop()
