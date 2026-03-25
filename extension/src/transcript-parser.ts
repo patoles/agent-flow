@@ -66,6 +66,15 @@ export class TranscriptParser {
 
   constructor(private delegate: TranscriptParserDelegate) {}
 
+  /** Clean up state associated with a completed session to prevent unbounded Map growth.
+   *  Pass the session's pending tool_use_ids so we can remove orphaned entries. */
+  clearSessionState(pendingToolUseIds: Iterable<string>): void {
+    for (const toolUseId of pendingToolUseIds) {
+      this.inlineSubagentState.delete(toolUseId)
+      this.subagentChildNames.delete(toolUseId)
+    }
+  }
+
   processTranscriptLine(
     line: string,
     agentName = ORCHESTRATOR_NAME,
@@ -77,7 +86,8 @@ export class TranscriptParser {
     let parsed: Record<string, unknown>
     try {
       parsed = JSON.parse(line.trim()) as Record<string, unknown>
-    } catch {
+    } catch (err) {
+      log.debug('Skipping unparseable line:', err)
       return
     }
 
@@ -396,7 +406,7 @@ export class TranscriptParser {
       // Reading beyond would add tool_use IDs to the dedup set that haven't
       // been accounted for in fileSize, causing readNewLines to silently skip them.
       const content = readFileChunk(filePath, 0, size)
-      for (const line of content.split('\n')) {
+      for (const line of content.split(/\r?\n/)) {
         if (!line.trim()) { continue }
         try {
           const entry = JSON.parse(line.trim()) as TranscriptEntry

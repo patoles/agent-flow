@@ -104,7 +104,7 @@ function startWatchingSubagentFile(
     const stat = fs.statSync(filePath)
     if (stat.size > 0) {
       const content = fs.readFileSync(filePath, 'utf-8')
-      for (const line of content.split('\n')) {
+      for (const line of content.split(/\r?\n/)) {
         if (!line.trim()) continue
         try {
           const raw: unknown = JSON.parse(line.trim())

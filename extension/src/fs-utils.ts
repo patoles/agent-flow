@@ -35,6 +35,6 @@ export function readNewFileLines(filePath: string, lastSize: number): { lines: s
   }
 
   const newContent = readFileChunk(filePath, lastSize, stat.size - lastSize)
-  const lines = newContent.split('\n').filter(Boolean)
+  const lines = newContent.split(/\r?\n/).filter(Boolean)
   return { lines, newSize: stat.size }
 }

@@ -44,7 +44,7 @@ export class JsonlEventSource implements vscode.Disposable {
 
   private processExistingContent(): void {
     const content = fs.readFileSync(this.filePath, 'utf-8')
-    const lines = content.split('\n').filter(Boolean)
+    const lines = content.split(/\r?\n/).filter(Boolean)
     for (const line of lines) {
       const event = this.parseLine(line)
       if (event) {

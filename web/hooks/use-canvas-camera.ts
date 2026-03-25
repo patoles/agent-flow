@@ -43,6 +43,16 @@ export function useCanvasCamera({
   const targetTransformRef = useRef<Transform | null>(null)
   const panVelocityRef = useRef({ vx: 0, vy: 0, active: false })
 
+  // Cache for computeFitTransform — avoids O(n) iteration every frame.
+  // Invalidates on collection reference change (React creates new Map/array on state updates).
+  const fitCacheRef = useRef<{
+    agents: Map<string, Agent> | null
+    toolCalls: Map<string, ToolCallNode> | null
+    discoveries: Discovery[] | null
+    selectedAgentId: string | null
+    result: Transform | null
+  }>({ agents: null, toolCalls: null, discoveries: null, selectedAgentId: null, result: null })
+
   // Initialize transform centered on first agents
   useEffect(() => {
     if (agentCount > 0 && transformRef.current.x === 0 && transformRef.current.y === 0) {
@@ -69,6 +79,16 @@ export function useCanvasCamera({
   const computeFitTransform = useCallback((): Transform | null => {
     const { agents, toolCalls, discoveries, dimensions, selectedAgentId } = drawPropsRef.current
     if (agents.size === 0) return null
+
+    // Return cached result if inputs haven't changed (reference equality —
+    // React creates new Map/array objects on state updates, so same ref = same data)
+    const cache = fitCacheRef.current
+    if (cache.agents === agents
+      && cache.toolCalls === toolCalls
+      && cache.discoveries === discoveries
+      && cache.selectedAgentId === selectedAgentId) {
+      return cache.result
+    }
 
     // Determine focus scope: if a non-main agent is selected, focus on it + descendants
     let focusScope: Set<string> | null = null
@@ -119,18 +139,23 @@ export function useCanvasCamera({
         maxY = Math.max(maxY, disc.y + DISC_BOUNDS_HALF_H)
       }
     }
-    if (minX === Infinity) return null
+    if (minX === Infinity) {
+      fitCacheRef.current = { agents, toolCalls, discoveries, selectedAgentId, result: null }
+      return null
+    }
     const padding = ANIM.viewportPadding
     const boundsW = maxX - minX + padding * 2
     const boundsH = maxY - minY + padding * 2
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
     const scale = Math.min(dimensions.width / boundsW, dimensions.height / boundsH, 2)
-    return {
+    const result = {
       x: dimensions.width / 2 - centerX * scale,
       y: dimensions.height / 2 - centerY * scale,
       scale,
     }
+    fitCacheRef.current = { agents, toolCalls, discoveries, selectedAgentId, result }
+    return result
   }, [getDescendantIds, drawPropsRef, simTimeRef])
 
   const doZoomToFit = useCallback(() => {

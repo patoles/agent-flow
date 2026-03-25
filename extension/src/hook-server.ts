@@ -49,8 +49,11 @@ interface HookPayload {
 export class HookServer implements vscode.Disposable {
   private server: http.Server | null = null
   private port: number
-  private sessionStartTimes = new Map<string, number>() // session_id → start timestamp
-  private agentNames = new Map<string, string>() // agent_id → friendly name
+  /** Per-session state — cleaned up on SessionEnd/Stop to prevent unbounded growth */
+  private sessionState = new Map<string, {
+    startTime: number
+    agentNames: Map<string, string> // agent_id → friendly name
+  }>()
 
   private readonly _onEvent = new vscode.EventEmitter<AgentEvent>()
 
@@ -128,8 +131,17 @@ export class HookServer implements vscode.Disposable {
     return this.port
   }
 
+  private getOrCreateSession(sessionId: string): { startTime: number; agentNames: Map<string, string> } {
+    let state = this.sessionState.get(sessionId)
+    if (!state) {
+      state = { startTime: Date.now(), agentNames: new Map() }
+      this.sessionState.set(sessionId, state)
+    }
+    return state
+  }
+
   private elapsedSeconds(sessionId?: string): number {
-    const startTime = sessionId ? (this.sessionStartTimes.get(sessionId) ?? Date.now()) : Date.now()
+    const startTime = sessionId ? (this.sessionState.get(sessionId)?.startTime ?? Date.now()) : Date.now()
     return (Date.now() - startTime) / 1000
   }
 
@@ -169,7 +181,7 @@ export class HookServer implements vscode.Disposable {
   }
 
   private handleSessionStart(payload: HookPayload): void {
-    this.sessionStartTimes.set(payload.session_id, Date.now())
+    this.getOrCreateSession(payload.session_id)
 
     this.emit({
       time: 0,
@@ -188,7 +200,7 @@ export class HookServer implements vscode.Disposable {
     const args = summarizeInput(toolName, payload.tool_input)
 
     // If this is the first event and no session start was received, auto-spawn
-    if (!this.sessionStartTimes.has(payload.session_id)) {
+    if (!this.sessionState.has(payload.session_id)) {
       this.handleSessionStart(payload)
     }
 
@@ -246,9 +258,10 @@ export class HookServer implements vscode.Disposable {
     const parentName = this.resolveAgentName(payload)
     const agentType = payload.agent_type || 'subagent'
     const agentId = payload.agent_id || ''
-    const childName = agentId ? `${agentType}-${agentId.slice(-SUBAGENT_ID_SUFFIX_LENGTH)}` : generateSubagentFallbackName(String(Date.now()), this.agentNames.size + 1)
+    const sessionAgents = this.getOrCreateSession(payload.session_id).agentNames
+    const childName = agentId ? `${agentType}-${agentId.slice(-SUBAGENT_ID_SUFFIX_LENGTH)}` : generateSubagentFallbackName(String(Date.now()), sessionAgents.size + 1)
 
-    this.agentNames.set(agentId, childName)
+    sessionAgents.set(agentId, childName)
 
     emitSubagentSpawn(
       { emit: (e, s) => this.emit(e, s), elapsed: (s) => this.elapsedSeconds(s) },
@@ -258,7 +271,8 @@ export class HookServer implements vscode.Disposable {
 
   private handleSubagentStop(payload: HookPayload): void {
     const agentId = payload.agent_id || ''
-    const childName = this.agentNames.get(agentId) || 'subagent'
+    const sessionAgents = this.sessionState.get(payload.session_id)?.agentNames
+    const childName = sessionAgents?.get(agentId) || 'subagent'
     const parentName = this.resolveAgentName(payload)
 
     this.emit({
@@ -302,14 +316,18 @@ export class HookServer implements vscode.Disposable {
       type: 'agent_complete',
       payload: { name: ORCHESTRATOR_NAME, sessionEnd: true },
     }, payload.session_id)
+
+    // Clean up per-session state to prevent unbounded Map growth
+    this.sessionState.delete(payload.session_id)
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
 
   private resolveAgentName(payload: HookPayload): string {
-    // If this event has an agent_id, use it. Otherwise default to orchestrator.
-    if (payload.agent_id && this.agentNames.has(payload.agent_id)) {
-      return this.agentNames.get(payload.agent_id)!
+    // If this event has an agent_id, look it up in the session's agent names.
+    if (payload.agent_id) {
+      const name = this.sessionState.get(payload.session_id)?.agentNames.get(payload.agent_id)
+      if (name) return name
     }
     return ORCHESTRATOR_NAME
   }
@@ -323,6 +341,7 @@ export class HookServer implements vscode.Disposable {
       this.server.close()
       this.server = null
     }
+    this.sessionState.clear()
     this._onEvent.dispose()
   }
 }

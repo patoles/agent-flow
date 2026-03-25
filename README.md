@@ -6,7 +6,9 @@ Real-time visualization of coding agent orchestration. Watch your agents think, 
 
 ## Why Agent Flow?
 
-Coding agents are powerful, but their execution is a black box — you see the final result, not the journey. Agent Flow makes the invisible visible:
+I built Agent Flow while developing [CraftMyGame](https://craftmygame.com), a game creation platform driven by AI agents. Debugging agent behavior was painful, so we made it visual. Now we're sharing it.
+
+Claude Code is powerful, but its execution is a black box — you see the final result, not the journey. Agent Flow makes the invisible visible:
 
 - **Understand agent behavior** — See how Claude breaks down problems, which tools it reaches for, and how subagents coordinate
 - **Debug tool call chains** — When something goes wrong, trace the exact sequence of decisions and tool calls that led there
@@ -15,14 +17,13 @@ Coding agents are powerful, but their execution is a black box — you see the f
 
 ## Features
 
-- **Live agent visualization** — Watch agent execution as an interactive node graph with real-time tool calls, branching, and return flows
-- **Auto-detect Claude Code sessions** — Automatically discovers active Claude Code sessions in your workspace and streams events
-- **Codex session watching** — Watches local Codex rollout sessions and replays tool, message, and subagent activity
-- **Claude Code hooks** — Lightweight HTTP hook server receives events directly from Claude Code for zero-latency streaming
-- **Multi-session support** — Track multiple concurrent agent sessions with tabs
-- **Interactive canvas** — Pan, zoom, click agents and tool calls to inspect details
-- **Timeline & transcript panels** — Review the full execution timeline, file attention heatmap, and message transcript
-- **JSONL log file support** — Point at any JSONL event log to replay or watch agent activity
+- **Live agent visualization**: Watch agent execution as an interactive node graph with real-time tool calls, branching, and return flows
+- **Auto-detect Claude Code sessions**: Automatically discovers active Claude Code sessions in your workspace and streams events
+- **Claude Code hooks**: Lightweight HTTP hook server receives events directly from Claude Code for zero-latency streaming
+- **Multi-session support**: Track multiple concurrent agent sessions with tabs
+- **Interactive canvas**: Pan, zoom, click agents and tool calls to inspect details
+- **Timeline & transcript panels**: Review the full execution timeline, file attention heatmap, and message transcript
+- **JSONL log file support**: Point at any JSONL event log to replay or watch agent activity
 
 ## Getting Started
 

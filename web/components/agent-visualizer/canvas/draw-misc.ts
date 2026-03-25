@@ -34,7 +34,7 @@ export function drawTetherLine(ctx: CanvasRenderingContext2D, agent: Agent, tran
   ctx.globalAlpha = TETHER.alpha
   ctx.strokeStyle = COLORS.holoBase + TETHER.strokeAlpha
   ctx.lineWidth = TETHER.lineWidth
-  ctx.setLineDash(TETHER.dash as unknown as number[])
+  ctx.setLineDash(TETHER.dash)
   ctx.beginPath()
   ctx.moveTo(startX, startY)
   const midX = (startX + endX) / 2

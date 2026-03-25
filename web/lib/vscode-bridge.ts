@@ -9,6 +9,7 @@
 export type { AgentEvent, SessionInfo, ConnectionStatus } from './bridge-types'
 import type { AgentEvent, SessionInfo, ConnectionStatus } from './bridge-types'
 
+type InitCallback = () => void
 type EventCallback = (event: AgentEvent) => void
 type StatusCallback = (status: ConnectionStatus, source: string) => void
 type ConfigCallback = (config: { mode: string; autoPlay: boolean; showMockData: boolean }) => void
@@ -19,6 +20,7 @@ class VSCodeBridge {
   private _status: ConnectionStatus = 'disconnected'
   private _source = ''
 
+  private initListeners: InitCallback[] = []
   private eventListeners: EventCallback[] = []
   private statusListeners: StatusCallback[] = []
   private configListeners: ConfigCallback[] = []
@@ -38,6 +40,8 @@ class VSCodeBridge {
       case '__vscode-bridge-init':
         this._isVSCode = true
         this.postToExtension({ type: 'ready' })
+        for (const cb of this.initListeners) cb()
+        this.initListeners = [] // one-shot: no need to keep listeners after init
         break
 
       case 'agent-event':
@@ -114,6 +118,15 @@ class VSCodeBridge {
     }
   }
 
+  /** Subscribe to bridge init. If already initialized, fires synchronously. */
+  onInit(callback: InitCallback): () => void {
+    if (this._isVSCode) {
+      callback()
+      return () => {} // already fired, nothing to unsubscribe
+    }
+    return this.subscribe(this.initListeners, callback)
+  }
+
   onEvent(callback: EventCallback): () => void {
     return this.subscribe(this.eventListeners, callback)
   }
@@ -149,12 +162,15 @@ class VSCodeBridge {
     this.postToExtension = (msg: Record<string, unknown>) => {
       postMessage(msg)
     }
+    for (const cb of this.initListeners) cb()
+    this.initListeners = []
   }
 
   dispose(): void {
     if (typeof window !== 'undefined') {
       window.removeEventListener('message', this.handleMessage)
     }
+    this.initListeners = []
     this.eventListeners = []
     this.statusListeners = []
     this.configListeners = []

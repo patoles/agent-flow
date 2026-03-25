@@ -40,8 +40,13 @@ const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects')
 
 export class SessionWatcher implements vscode.Disposable {
   private dirWatcher: fs.FSWatcher | null = null
+  private dirWatchers = new Map<string, fs.FSWatcher>()
   private sessions = new Map<string, WatchedSession>()
   private workspacePath: string | null = null
+  /** Resolved absolute workspace path for subdirectory verification */
+  private resolvedWorkspace: string | null = null
+  /** Cache for isContainedProject results — avoids re-reading JSONL files every scan */
+  private containedProjectCache = new Map<string, boolean>()
   private scanInterval: NodeJS.Timeout | null = null
 
   private readonly _onEvent = new vscode.EventEmitter<AgentEvent>()
@@ -124,7 +129,23 @@ export class SessionWatcher implements vscode.Disposable {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     if (workspaceFolder) {
       // Claude Code encodes project paths: /Users/simon/project → -Users-simon-project
-      this.workspacePath = workspaceFolder.replace(/\//g, '-')
+      // Resolve symlinks first, then replace /, \ (Windows), and : (drive letter) with -
+      let resolved = workspaceFolder
+      try { resolved = fs.realpathSync(resolved) } catch { /* use original if realpathSync fails */ }
+      const encoded = resolved.replace(/[/\\:]/g, '-')
+
+      this.resolvedWorkspace = resolved
+
+      // Try the resolved encoding first; fall back to unresolved if the directory doesn't exist
+      // (handles edge cases where Claude Code didn't resolve symlinks the same way)
+      const resolvedDir = path.join(CLAUDE_DIR, encoded)
+      if (fs.existsSync(resolvedDir)) {
+        this.workspacePath = encoded
+      } else {
+        const unresolvedEncoded = workspaceFolder.replace(/[/\\:]/g, '-')
+        const unresolvedDir = path.join(CLAUDE_DIR, unresolvedEncoded)
+        this.workspacePath = fs.existsSync(unresolvedDir) ? unresolvedEncoded : encoded
+      }
       log.info(`Starting — scoped to project: ${this.workspacePath}`)
     } else {
       log.info('Starting — no workspace, scanning all projects')
@@ -132,27 +153,111 @@ export class SessionWatcher implements vscode.Disposable {
 
     this.scanForActiveSessions()
 
-    // Watch the project directory for instant new-file detection
-    if (this.workspacePath) {
-      const projectDir = path.join(CLAUDE_DIR, this.workspacePath)
-      if (fs.existsSync(projectDir)) {
-        try {
-          this.dirWatcher = fs.watch(projectDir, (_eventType, filename) => {
-            if (filename && filename.endsWith('.jsonl')) {
-              const sessionId = path.basename(filename, '.jsonl')
-              if (!this.sessions.has(sessionId)) {
-                this.scanForActiveSessions()
-              }
-            }
-          })
-        } catch (err) { log.debug('Dir watch failed (may not exist yet):', err) }
-      }
-    }
+    // Watch project directories for instant new-file detection.
+    // Watch both the exact workspace dir and the parent CLAUDE_DIR (to detect
+    // new subdirectory project dirs, e.g. CLI sessions started from a subfolder).
+    this.watchProjectDirs()
 
     // Re-scan periodically as fallback (1s instead of 3s for faster detection)
     this.scanInterval = setInterval(() => {
       this.scanForActiveSessions()
     }, SCAN_INTERVAL_MS)
+  }
+
+  /** Set up fs.watch on known project directories and the parent CLAUDE_DIR */
+  private watchProjectDirs(): void {
+    // Watch the exact workspace project dir
+    if (this.workspacePath) {
+      const projectDir = path.join(CLAUDE_DIR, this.workspacePath)
+      this.watchDirForJsonl(projectDir)
+    }
+
+    // Watch CLAUDE_DIR itself so we detect new subdirectory project dirs
+    // (e.g. when a CLI session starts in a subfolder and creates a new project dir)
+    if (this.workspacePath && fs.existsSync(CLAUDE_DIR)) {
+      try {
+        this.dirWatcher = fs.watch(CLAUDE_DIR, (_eventType, filename) => {
+          if (!filename) return
+          // A new project dir appeared — check if it's a subdirectory of our workspace
+          const dirPath = path.join(CLAUDE_DIR, filename)
+          try {
+            if (fs.statSync(dirPath).isDirectory() && this.isContainedProject(filename)) {
+              this.watchDirForJsonl(dirPath)
+              this.scanForActiveSessions()
+            }
+          } catch { /* stat may fail for transient files */ }
+        })
+      } catch (err) { log.debug('CLAUDE_DIR watch failed:', err) }
+    }
+  }
+
+  /** Watch a single project directory for new .jsonl files */
+  private watchDirForJsonl(projectDir: string): void {
+    if (this.dirWatchers.has(projectDir)) return // already watching
+    if (!fs.existsSync(projectDir)) return
+    try {
+      const watcher = fs.watch(projectDir, (_eventType, filename) => {
+        if (filename && filename.endsWith('.jsonl')) {
+          const sessionId = path.basename(filename, '.jsonl')
+          if (!this.sessions.has(sessionId)) {
+            this.scanForActiveSessions()
+          }
+        }
+      })
+      this.dirWatchers.set(projectDir, watcher)
+    } catch (err) { log.debug('Dir watch failed (may not exist yet):', err) }
+  }
+
+  /** Check whether a project dir contains sessions running under the workspace.
+   *  The encoded dir name is lossy (hyphens and path separators both become -),
+   *  so instead of trying to decode it, we read the cwd from the JSONL files
+   *  in the directory — that's the authoritative source of truth.
+   *  Results are cached since a project dir's cwd never changes. */
+  private isContainedProject(encodedDirName: string): boolean {
+    if (!this.workspacePath || !this.resolvedWorkspace) return false
+    // Quick prefix check to avoid reading files from obviously unrelated dirs
+    if (!encodedDirName.startsWith(this.workspacePath + '-')) return false
+
+    const cached = this.containedProjectCache.get(encodedDirName)
+    if (cached !== undefined) return cached
+
+    const result = this.readCwdFromProjectDir(encodedDirName)
+    // Only cache positive results — a dir with no JSONL files yet (race on
+    // creation) should be re-checked on the next scan once files appear.
+    if (result) this.containedProjectCache.set(encodedDirName, true)
+    return result
+  }
+
+  /** Read JSONL files in a project dir to find the cwd and check containment. */
+  private readCwdFromProjectDir(encodedDirName: string): boolean {
+    const dirPath = path.join(CLAUDE_DIR, encodedDirName)
+    try {
+      const files = fs.readdirSync(dirPath)
+      for (const file of files) {
+        if (!file.endsWith('.jsonl')) continue
+        // Read enough to cover the first few lines (cwd is typically on line 3)
+        const fd = fs.openSync(path.join(dirPath, file), 'r')
+        try {
+          const buf = Buffer.alloc(8192)
+          const bytesRead = fs.readSync(fd, buf, 0, 8192, 0)
+          if (bytesRead === 0) continue
+          const lines = buf.toString('utf8', 0, bytesRead).split('\n')
+          for (const line of lines) {
+            if (!line.includes('"cwd"')) continue
+            try {
+              const entry = JSON.parse(line)
+              if (typeof entry.cwd === 'string') {
+                let cwd = entry.cwd
+                try { cwd = fs.realpathSync(cwd) } catch { /* use as-is */ }
+                return cwd === this.resolvedWorkspace
+                  || cwd.startsWith(this.resolvedWorkspace + path.sep)
+              }
+            } catch { /* malformed line, try next */ }
+          }
+        } finally { fs.closeSync(fd) }
+      }
+    } catch { /* dir may not exist or be readable */ }
+    return false
   }
 
   private scanForActiveSessions(): void {
@@ -163,10 +268,26 @@ export class SessionWatcher implements vscode.Disposable {
     try {
       const dirsToScan: string[] = []
       if (this.workspacePath) {
+        // Always include the exact workspace project dir
         const projectDir = path.join(CLAUDE_DIR, this.workspacePath)
         if (fs.existsSync(projectDir)) {
           dirsToScan.push(projectDir)
         }
+
+        // Also include subdirectory project dirs (e.g. CLI sessions started
+        // from a subfolder like project/extension/src). Uses containment check
+        // to avoid matching unrelated projects with a similar path prefix.
+        try {
+          const allDirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })
+          for (const dir of allDirs) {
+            if (!dir.isDirectory()) continue
+            const fullPath = path.join(CLAUDE_DIR, dir.name)
+            if (fullPath === projectDir) continue // already added
+            if (this.isContainedProject(dir.name)) {
+              dirsToScan.push(fullPath)
+            }
+          }
+        } catch { /* readdir may fail if CLAUDE_DIR is being modified */ }
       } else {
         const projectDirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })
         for (const dir of projectDirs) {
@@ -437,6 +558,8 @@ export class SessionWatcher implements vscode.Disposable {
   dispose(): void {
     this.dirWatcher?.close()
     this.dirWatcher = null
+    for (const w of this.dirWatchers.values()) w.close()
+    this.dirWatchers.clear()
     for (const [, session] of this.sessions) {
       session.fileWatcher?.close()
       if (session.pollTimer) { clearInterval(session.pollTimer) }
@@ -448,6 +571,8 @@ export class SessionWatcher implements vscode.Disposable {
       }
       session.subagentWatchers.clear()
       session.subagentsDirWatcher?.close()
+      // Clean up orphaned parser state for this session
+      this.parser.clearSessionState(session.pendingToolCalls.keys())
     }
     this.sessions.clear()
     if (this.scanInterval) {

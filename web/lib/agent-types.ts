@@ -251,7 +251,7 @@ export const TETHER = {
   alpha: 0.7,
   strokeAlpha: '80',
   lineWidth: 1,
-  dash: [6, 4] as readonly number[],
+  dash: [6, 4] as number[],
   dotRadius: 3,
   curveOffset: 20,
 } as const
