@@ -69,8 +69,32 @@ You can also point Agent Flow at a JSONL event log file:
 
 ## Requirements
 
-- VS Code 1.85 or later
+- [JDK 26](https://www.oracle.com/tw/java/technologies/downloads/#jdk26-mac) or later
+- [pnpm](https://pnpm.io/)
+- A VSCode-compatible IDE (e.g. [VS Code](https://code.visualstudio.com/), [Cursor](https://cursor.sh/), [Windsurf](https://windsurf.com/))
 - For auto-detection: Claude Code CLI with active sessions
+
+## Development
+
+```bash
+pnpm i              # install dependencies for all packages
+pnpm run setup      # configure Claude Code hooks (one-time)
+pnpm run dev        # start dev server + event relay
+```
+
+`pnpm run dev` starts both the Next.js dev server and an event relay that receives Claude Code events and streams them to the browser via SSE.
+
+Other scripts:
+
+| Script | Description |
+|--------|-------------|
+| `pnpm run dev:demo` | Start with demo/mock data |
+| `pnpm run dev:relay` | Run the event relay server standalone |
+| `pnpm run dev:extension` | Watch-build the extension |
+| `pnpm run build:all` | Production build (webview + extension) |
+| `pnpm run build:web` | Build the Next.js web app |
+| `pnpm run build:extension` | Build the extension |
+| `pnpm run build:webview` | Build the webview assets |
 
 ## Author
 
