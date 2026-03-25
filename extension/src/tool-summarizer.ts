@@ -16,10 +16,60 @@ function tailPath(filePath: string, segments = 2): string {
   return String(filePath).split('/').slice(-segments).join('/')
 }
 
+/**
+ * Heuristic fallback summarizer for unknown / custom tools.
+ *
+ * Instead of JSON-dumping the entire input (which is unreadable at 80 chars),
+ * we try a prioritised list of "most-useful" keys common across tool families:
+ *   command / query / url / message / content / path / file_path / description / prompt
+ * If none match, fall back to the first string value found in the object.
+ */
+function summarizeFallback(toolName: string, input?: Record<string, unknown>): string {
+  if (!input) { return '' }
+
+  const priorities = [
+    'command',     // shell-execution family
+    'query',       // search family
+    'url',         // fetch / browser family
+    'message',     // communication / messaging family
+    'content',     // write / store family
+    'task',        // spawn / orchestration family
+    'description', // task / agent family
+    'prompt',      // task / agent family
+    'path',        // file family
+    'file_path',   // file family
+    'action',      // action-based tools (browser, message, etc.)
+    'text',        // generic text
+  ]
+
+  for (const key of priorities) {
+    const val = input[key]
+    if (typeof val === 'string' && val.trim()) {
+      const prefix = key === 'action' ? `${val}: ` : ''
+      if (prefix) {
+        // For action-based tools, include the target/element too
+        const target = input.target || input.element || input.selector || ''
+        return (prefix + String(target || '')).slice(0, ARGS_MAX)
+      }
+      return val.slice(0, ARGS_MAX)
+    }
+  }
+
+  // Last resort: first string value in the object
+  for (const val of Object.values(input)) {
+    if (typeof val === 'string' && val.trim()) {
+      return val.slice(0, ARGS_MAX)
+    }
+  }
+
+  return JSON.stringify(input).slice(0, ARGS_MAX)
+}
+
 /** Summarize tool input into a short human-readable string */
 export function summarizeInput(toolName: string, input?: Record<string, unknown>): string {
   if (!input) { return '' }
   switch (toolName) {
+    // ── Built-in Claude Code tools ────────────────────────────────────────
     case 'Bash':
       return String(input.command || '').slice(0, ARGS_MAX)
     case 'Read':
@@ -62,8 +112,75 @@ export function summarizeInput(toolName: string, input?: Record<string, unknown>
       return String(input.skill || '').slice(0, SKILL_NAME_MAX)
     case 'NotebookEdit':
       return tailPath(String(input.notebook_path || '')) + ` cell ${input.cell_number ?? '?'}`
+
+    // ── Custom / OpenClaw tool aliases ────────────────────────────────────
+    // exec: shell execution (custom Claude Code environments)
+    case 'exec': {
+      const cmd = String(input.command || '').slice(0, ARGS_MAX)
+      const cwd = input.workdir ? ` (${tailPath(String(input.workdir), 1)})` : ''
+      return (cmd + cwd).slice(0, ARGS_MAX)
+    }
+
+    // process: manage running exec sessions (list/poll/log/write/kill)
+    case 'process': {
+      const action = String(input.action || '')
+      const sid = input.sessionId ? String(input.sessionId).slice(0, 8) : ''
+      return sid ? `${action} ${sid}` : action
+    }
+
+    // browser: browser automation
+    case 'browser': {
+      const action = String(input.action || '')
+      const url = input.url ? (() => {
+        try { const u = new URL(String(input.url)); return u.hostname + u.pathname.slice(0, URL_PATH_MAX) } catch { return String(input.url).slice(0, 30) }
+      })() : ''
+      const element = input.element ? String(input.element).slice(0, 30) : ''
+      return [action, url || element].filter(Boolean).join(': ').slice(0, ARGS_MAX)
+    }
+
+    // web_search: web search (underscore variant)
+    case 'web_search':
+      return String(input.query || '').slice(0, ARGS_MAX)
+
+    // web_fetch: URL fetch (underscore variant)
+    case 'web_fetch': {
+      const url = String(input.url || '')
+      try { const u = new URL(url); return u.hostname + u.pathname.slice(0, URL_PATH_MAX) } catch { return url.slice(0, ARGS_MAX) }
+    }
+
+    // memory tools
+    case 'memory_search':
+      return String(input.query || '').slice(0, ARGS_MAX)
+    case 'memory_store':
+      return String(input.content || '').slice(0, ARGS_MAX)
+    case 'memory_profile':
+    case 'memory_entities':
+    case 'memory_questions':
+    case 'memory_identity':
+      return input.name ? String(input.name) : ''
+
+    // sessions / subagent spawning
+    case 'sessions_spawn': {
+      const task = String(input.task || '').slice(0, TASK_MAX)
+      const mode = input.mode ? ` [${input.mode}]` : ''
+      return (task + mode).slice(0, ARGS_MAX)
+    }
+    case 'sessions_send':
+      return String(input.message || '').slice(0, ARGS_MAX)
+    case 'sessions_list':
+    case 'sessions_history':
+      return input.sessionKey ? String(input.sessionKey).slice(0, ARGS_MAX) : 'list sessions'
+
+    // messaging (Slack / WhatsApp / etc.)
+    case 'message': {
+      const action = String(input.action || '')
+      const target = input.target ? ` → ${String(input.target).slice(0, 20)}` : ''
+      const msg = input.message ? `: ${String(input.message).slice(0, 30)}` : ''
+      return (action + target + msg).slice(0, ARGS_MAX)
+    }
+
     default:
-      return JSON.stringify(input).slice(0, ARGS_MAX)
+      return summarizeFallback(toolName, input)
   }
 }
 
@@ -108,9 +225,11 @@ export function extractInputData(toolName: string, input: Record<string, unknown
           content: String(input.content || '').slice(0, EDIT_CONTENT_MAX),
         }
       case 'Bash':
+      case 'exec':
         return {
           command: String(input.command || ''),
           description: String(input.description || ''),
+          ...(input.workdir ? { workdir: String(input.workdir) } : {}),
         }
       case 'Read':
         return {
@@ -130,10 +249,12 @@ export function extractInputData(toolName: string, input: Record<string, unknown
           path: String(input.path || ''),
         }
       case 'WebSearch':
+      case 'web_search':
         return {
           query: String(input.query || ''),
         }
       case 'WebFetch':
+      case 'web_fetch':
         return {
           url: String(input.url || ''),
           prompt: String(input.prompt || '').slice(0, WEB_FETCH_PROMPT_MAX),
@@ -147,6 +268,36 @@ export function extractInputData(toolName: string, input: Record<string, unknown
           })) : [],
         }
       }
+      case 'browser':
+        return {
+          action: String(input.action || ''),
+          ...(input.url ? { url: String(input.url) } : {}),
+          ...(input.element ? { element: String(input.element) } : {}),
+          ...(input.selector ? { selector: String(input.selector) } : {}),
+        }
+      case 'memory_search':
+        return {
+          query: String(input.query || ''),
+          ...(input.maxResults ? { maxResults: input.maxResults } : {}),
+          ...(input.namespace ? { namespace: String(input.namespace) } : {}),
+        }
+      case 'memory_store':
+        return {
+          content: String(input.content || '').slice(0, EDIT_CONTENT_MAX),
+          ...(input.category ? { category: String(input.category) } : {}),
+        }
+      case 'sessions_spawn':
+        return {
+          task: String(input.task || '').slice(0, EDIT_CONTENT_MAX),
+          ...(input.agentId ? { agentId: String(input.agentId) } : {}),
+          ...(input.mode ? { mode: String(input.mode) } : {}),
+        }
+      case 'message':
+        return {
+          action: String(input.action || ''),
+          ...(input.target ? { target: String(input.target) } : {}),
+          ...(input.message ? { message: String(input.message).slice(0, EDIT_CONTENT_MAX) } : {}),
+        }
       default:
         return undefined
     }

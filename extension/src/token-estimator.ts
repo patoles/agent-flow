@@ -32,7 +32,14 @@ export function estimateTokensFromText(text: string): number {
 /** Estimate token cost of a tool result based on tool type */
 export function estimateTokenCost(toolName: string, result: string): number {
   const baseTokens = Math.ceil(result.length / CHARS_PER_TOKEN)
-  if (toolName === 'Read') { return baseTokens }
+  // Full-content tools — return the whole result
+  if (toolName === 'Read' || toolName === 'exec' || toolName === 'Bash') { return baseTokens }
+  // Pattern/listing tools — content is partial so discount it
   if (toolName === 'Grep' || toolName === 'Glob') { return Math.ceil(baseTokens * GREP_TOKEN_MULTIPLIER) }
+  // Web / memory tools — result is a summary, not full content
+  if (['WebFetch', 'web_fetch', 'WebSearch', 'web_search',
+       'memory_search', 'memory_store', 'browser'].includes(toolName)) {
+    return Math.ceil(baseTokens * DEFAULT_TOKEN_MULTIPLIER)
+  }
   return Math.ceil(baseTokens * DEFAULT_TOKEN_MULTIPLIER)
 }

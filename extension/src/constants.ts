@@ -165,6 +165,12 @@ export const FILE_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'] as const
 /** Pattern-based tools (discovery type = 'pattern' instead of 'file') */
 export const PATTERN_TOOLS = ['Glob', 'Grep'] as const
 
+/**
+ * Custom tool names that behave like Bash for summarization purposes.
+ * Add environment-specific shell-execution tool names here.
+ */
+export const BASH_ALIAS_TOOLS = ['exec'] as const
+
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 /** Suffix length used when building subagent names from IDs */
