@@ -33,8 +33,12 @@ interface BridgeHookResult {
 
 /**
  * Connects the VS Code bridge to the React app.
- * When running standalone, returns useMockData=true and no events.
- * When inside VS Code, receives events and forwards control commands.
+ *
+ * Supports three modes:
+ *  - VS Code webview: receives events via postMessage from the extension host
+ *  - Standalone web (npm run dev:standalone): connects to the local hook-server
+ *    via SSE at /hook-events and receives live Claude Code events
+ *  - Standalone web (npm run dev): shows mock data (no hook server running)
  *
  * Supports multi-session: events are buffered per-session so switching
  * sessions replays the correct event history.
@@ -195,6 +199,114 @@ export function useVSCodeBridge(): BridgeHookResult {
       unsubSession()
     }
   }, [])
+
+  // ── Standalone SSE mode ────────────────────────────────────────────────────
+  // When not inside VS Code, try to connect to the local hook-server via SSE.
+  // If the connection succeeds, switch out of mock-data mode and receive live
+  // Claude Code events exactly as the VS Code extension would.
+  useEffect(() => {
+    // Don't connect if already in VS Code mode
+    if (isVSCode) return
+
+    let es: EventSource | null = null
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null
+    let cancelled = false
+
+    function connect() {
+      if (cancelled) return
+      try {
+        es = new EventSource('/hook-events')
+      } catch {
+        // EventSource not available (SSR) — skip
+        return
+      }
+
+      es.onopen = () => {
+        if (cancelled) return
+        setUseMockData(false)
+        setConnectionStatus('connected')
+      }
+
+      es.onerror = () => {
+        if (cancelled) return
+        setConnectionStatus('disconnected')
+        es?.close()
+        // Retry after 3 s
+        retryTimeout = setTimeout(connect, 3000)
+      }
+
+      es.onmessage = (e) => {
+        if (cancelled) return
+        let msg: Record<string, unknown>
+        try { msg = JSON.parse(e.data) } catch { return }
+
+        const type = msg.type as string
+
+        if (type === 'agent-event') {
+          const event = msg.event as AgentEvent
+          const simEvent: SimulationEvent = {
+            time: event.time,
+            type: event.type as SimulationEvent['type'],
+            payload: event.payload,
+            sessionId: event.sessionId,
+          }
+          if (event.sessionId) {
+            const buf = sessionEventsRef.current.get(event.sessionId) || []
+            buf.push(simEvent)
+            sessionEventsRef.current.set(event.sessionId, buf)
+          }
+          const selected = selectedSessionIdRef.current
+          if (selected && event.sessionId === selected) {
+            pendingEventsRef.current.push(simEvent)
+            setEventVersion(v => v + 1)
+          } else if (event.sessionId && event.sessionId !== selected) {
+            setSessionsWithActivity(prev => {
+              if (prev.has(event.sessionId!)) return prev
+              const next = new Set(prev)
+              next.add(event.sessionId!)
+              return next
+            })
+          }
+        } else if (type === 'session-list') {
+          const sessionList = msg.sessions as SessionInfo[]
+          setSessions(sessionList)
+          if (!selectedSessionIdRef.current && sessionList.length > 0) {
+            const sorted = [...sessionList].sort((a, b) => {
+              const aA = a.status === 'active' ? 1 : 0
+              const bA = b.status === 'active' ? 1 : 0
+              if (aA !== bA) return bA - aA
+              return b.lastActivityTime - a.lastActivityTime
+            })
+            const autoId = sorted[0].id
+            selectedSessionIdRef.current = autoId
+            setSelectedSessionId(autoId)
+          }
+        } else if (type === 'session-started') {
+          const session = msg.session as SessionInfo
+          setSessions(prev => {
+            if (prev.find(s => s.id === session.id)) return prev.map(s => s.id === session.id ? { ...s, status: 'active' as const, lastActivityTime: Date.now() } : s)
+            return [...prev, session]
+          })
+          selectedSessionIdRef.current = session.id
+          setSelectedSessionId(session.id)
+        } else if (type === 'session-updated') {
+          const { sessionId, label } = msg as { sessionId: string; label: string }
+          setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, label } : s))
+        } else if (type === 'session-ended') {
+          const { sessionId } = msg as { sessionId: string }
+          setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, status: 'completed' as const } : s))
+        }
+      }
+    }
+
+    connect()
+
+    return () => {
+      cancelled = true
+      es?.close()
+      if (retryTimeout) clearTimeout(retryTimeout)
+    }
+  }, [isVSCode]) // re-run only if VS Code mode changes
 
   const consumeEvents = useCallback(() => {
     // Clear in-place so stale closures in animation callbacks
