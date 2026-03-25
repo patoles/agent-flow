@@ -4,6 +4,7 @@
     "build:extension": "pnpm --filter agent-flow run build",
     "build:web": "pnpm --filter agent-flow-web run build",
     "build:webview": "pnpm --filter agent-flow-web run build:webview",
-    "build:all": "pnpm run build:webview && pnpm run build:extension"
+    "build:all": "pnpm run build:webview && pnpm run build:extension",
+    "setup": "node scripts/setup.js"
   }
 }
