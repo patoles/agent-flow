@@ -212,10 +212,18 @@ export function useVSCodeBridge(): BridgeHookResult {
     let retryTimeout: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
 
+    // Connect directly to the hook server — Next.js rewrites() buffers SSE
+    // responses so we bypass the proxy and connect to the hook server directly.
+    // The hook server runs on HOOK_SERVER_PORT (default 7842) and serves CORS headers.
+    const hookPort = typeof window !== 'undefined' && (window as Window & { __HOOK_SERVER_PORT__?: number }).__HOOK_SERVER_PORT__
+      ? (window as Window & { __HOOK_SERVER_PORT__?: number }).__HOOK_SERVER_PORT__
+      : 7842
+    const sseUrl = `http://127.0.0.1:${hookPort}/hook-events`
+
     function connect() {
       if (cancelled) return
       try {
-        es = new EventSource('/hook-events')
+        es = new EventSource(sseUrl)
       } catch {
         // EventSource not available (SSR) — skip
         return
