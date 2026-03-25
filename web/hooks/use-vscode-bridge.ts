@@ -57,14 +57,11 @@ export function useVSCodeBridge(): BridgeHookResult {
     const bridge = vscodeBridge
     if (!bridge) { return }
 
-    // Listen for bridge initialization
-    const checkInterval = setInterval(() => {
-      if (bridge.isVSCode) {
-        setIsVSCode(true)
-        setUseMockData(false)
-        clearInterval(checkInterval)
-      }
-    }, 100)
+    // Listen for bridge initialization (event-driven, no polling)
+    const unsubInit = bridge.onInit(() => {
+      setIsVSCode(true)
+      setUseMockData(false)
+    })
 
     // Listen for events — buffer by session, deliver to pending if session matches.
     // selectedSessionIdRef is updated synchronously (not via React state) so it's
@@ -188,7 +185,7 @@ export function useVSCodeBridge(): BridgeHookResult {
     })
 
     return () => {
-      clearInterval(checkInterval)
+      unsubInit()
       unsubEvent()
       unsubStatus()
       unsubConfig()

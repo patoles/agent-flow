@@ -66,6 +66,15 @@ export class TranscriptParser {
 
   constructor(private delegate: TranscriptParserDelegate) {}
 
+  /** Clean up state associated with a completed session to prevent unbounded Map growth.
+   *  Pass the session's pending tool_use_ids so we can remove orphaned entries. */
+  clearSessionState(pendingToolUseIds: Iterable<string>): void {
+    for (const toolUseId of pendingToolUseIds) {
+      this.inlineSubagentState.delete(toolUseId)
+      this.subagentChildNames.delete(toolUseId)
+    }
+  }
+
   processTranscriptLine(
     line: string,
     agentName = ORCHESTRATOR_NAME,
@@ -77,7 +86,8 @@ export class TranscriptParser {
     let parsed: Record<string, unknown>
     try {
       parsed = JSON.parse(line.trim()) as Record<string, unknown>
-    } catch {
+    } catch (err) {
+      log.debug('Skipping unparseable line:', err)
       return
     }
 

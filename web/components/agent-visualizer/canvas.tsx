@@ -67,6 +67,17 @@ export function AgentCanvas({
   const prevAgentStatesRef = useRef<Map<string, string>>(new Map())
   const prevToolStatesRef = useRef<Map<string, string>>(new Map())
 
+  // Rate-limited error logging for the draw loop (avoid flooding console)
+  const lastDrawErrorRef = useRef(0)
+
+  // Caches for per-frame lookups — avoid rebuilding Set/Map every ~16ms
+  const edgeLookupCacheRef = useRef<{
+    particles: Particle[]
+    edges: Edge[]
+    activeEdgeIds: Set<string>
+    edgeMap: Map<string, Edge>
+  }>({ particles: [], edges: [], activeEdgeIds: new Set(), edgeMap: new Map() })
+
   // ─── Stable refs for animation loop & event handlers ────────────────────
   const makeDrawProps = (prev?: { isDragging: boolean }) => ({
     agents, toolCalls, particles, edges, discoveries,
@@ -141,8 +152,12 @@ export function AgentCanvas({
 
   // ─── Main draw loop ────────────────────────────────────────────────────
 
+  // Stable ref so the rAF loop always calls the latest draw without
+  // re-subscribing when the callback identity changes.
+  const drawRef = useRef<(timestamp: number) => void>(() => {})
+
   const draw = useCallback((timestamp: number) => {
-    animationRef.current = requestAnimationFrame(draw)
+    animationRef.current = requestAnimationFrame((ts) => drawRef.current(ts))
 
     const canvas = mainCanvasRef.current
     if (!canvas) return
@@ -214,9 +229,18 @@ export function AgentCanvas({
     ctx.translate(transform.x, transform.y)
     ctx.scale(transform.scale, transform.scale)
 
-    // Pre-compute shared lookup structures once per frame
-    const activeEdgeIds = getActiveEdgeIds(particles)
-    const edgeMap = buildEdgeMap(edges)
+    // Pre-compute shared lookup structures — cached across frames when inputs are unchanged
+    const elCache = edgeLookupCacheRef.current
+    let activeEdgeIds: Set<string>
+    let edgeMap: Map<string, Edge>
+    if (elCache.particles === particles && elCache.edges === edges) {
+      activeEdgeIds = elCache.activeEdgeIds
+      edgeMap = elCache.edgeMap
+    } else {
+      activeEdgeIds = getActiveEdgeIds(particles)
+      edgeMap = buildEdgeMap(edges)
+      edgeLookupCacheRef.current = { particles, edges, activeEdgeIds, edgeMap }
+    }
 
     drawDiscoveryConnections(ctx, discoveries, agents)
     drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
@@ -237,13 +261,24 @@ export function AgentCanvas({
 
     if (showCostOverlay) drawCostSummaryPanel(ctx, agents, toolCalls)
     if (bloomRef.current) bloomRef.current.apply(canvas, ctx)
-    } catch { /* keep rAF loop alive */ }
+    } catch (err) {
+      // Log at most once every 5s to avoid flooding the console
+      const now = Date.now()
+      if (now - lastDrawErrorRef.current > 5000) {
+        lastDrawErrorRef.current = now
+        console.warn('[AgentCanvas] draw error:', err)
+      }
+    }
   }, [detectStateChanges, updateCamera, updateDragLerp, transformRef])
 
+  drawRef.current = draw
+
   useEffect(() => {
-    animationRef.current = requestAnimationFrame(draw)
+    const loop = (timestamp: number) => drawRef.current(timestamp)
+    animationRef.current = requestAnimationFrame(loop)
     return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current) }
-  }, [draw])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- drawRef is stable; rAF loop set up once
+  }, [])
 
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden" style={{ cursor: isDragging ? 'grabbing' : 'grab' }}>

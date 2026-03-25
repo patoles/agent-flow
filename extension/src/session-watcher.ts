@@ -462,6 +462,8 @@ export class SessionWatcher implements vscode.Disposable {
       }
       session.subagentWatchers.clear()
       session.subagentsDirWatcher?.close()
+      // Clean up orphaned parser state for this session
+      this.parser.clearSessionState(session.pendingToolCalls.keys())
     }
     this.sessions.clear()
     if (this.scanInterval) {
