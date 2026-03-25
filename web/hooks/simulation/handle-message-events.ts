@@ -19,11 +19,16 @@ export function handleMessage(
     'assistant'
 
   // Rename main agent to the first user message (more recognizable than "orchestrator")
+  // Only rename if the name is still a generic default — skip if it's already meaningful
+  // (e.g. "OpenClaw" from event hub, or any non-default name)
   if (role === 'user') {
     const msgAgentForName = state.agents.get(agentName)
-    if (msgAgentForName && msgAgentForName.isMain && msgAgentForName.name === agentName) {
+    if (msgAgentForName && msgAgentForName.isMain && msgAgentForName.name === 'Orchestrator') {
       const shortName = content.slice(0, LABEL_LEN_NAME).replace(/\n/g, ' ').trim()
       state.agents.set(agentName, { ...msgAgentForName, name: shortName || agentName, task: content.slice(0, LABEL_LEN_TASK) })
+    } else if (msgAgentForName && msgAgentForName.isMain && !msgAgentForName.task) {
+      // Still set the task (shown as subtitle) even if we keep the name
+      state.agents.set(agentName, { ...msgAgentForName, task: content.slice(0, LABEL_LEN_TASK) })
     }
   }
 

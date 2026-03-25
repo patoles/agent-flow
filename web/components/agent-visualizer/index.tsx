@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from "react"
 import { useAgentSimulation } from "@/hooks/use-agent-simulation"
 import { useVSCodeBridge } from "@/hooks/use-vscode-bridge"
+import { useEventHub } from "@/hooks/use-event-hub"
 import { useSelectionState } from "@/hooks/use-selection-state"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { AgentCanvas } from "./canvas"
@@ -26,7 +27,10 @@ import { TopBar } from "./top-bar"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
-  const bridge = useVSCodeBridge()
+  const vscodeBridge = useVSCodeBridge()
+  const hubBridge = useEventHub()
+  // Prefer event hub when connected; fall back to VS Code bridge otherwise
+  const bridge = hubBridge.connectionStatus === 'connected' ? hubBridge : vscodeBridge
 
   const {
     agents,
@@ -79,10 +83,10 @@ export function AgentVisualizer() {
   const [isReviewing, setIsReviewing] = useState(false)
   const { isMuted, seekingRef, handleToggleMute } = useAudioEffects(agents, toolCalls, isReviewing)
 
-  // Auto-play on mount
+  // Auto-play on mount — play immediately to avoid missing events
+  // that arrive before the delayed timer fires
   useEffect(() => {
-    const timer = setTimeout(() => play(), TIMING.autoPlayDelayMs)
-    return () => clearTimeout(timer)
+    play()
   }, [play])
 
   // Per-session state cache: save/restore simulation state on tab switch
@@ -93,12 +97,22 @@ export function AgentVisualizer() {
   const prevSelectedRef = useRef<string | null>(null)
   useLayoutEffect(() => {
     if (bridge.selectedSessionId && bridge.selectedSessionId !== prevSelectedRef.current) {
-      // Save outgoing session state (if any)
-      if (prevSelectedRef.current !== null) {
-        sessionCacheRef.current.set(prevSelectedRef.current, {
+      const isInitialSelection = prevSelectedRef.current === null
+
+      // Save outgoing session state (if switching away from an existing session)
+      if (!isInitialSelection) {
+        sessionCacheRef.current.set(prevSelectedRef.current!, {
           snapshot: saveSnapshot(),
-          eventCount: bridge.getSessionEventCount(prevSelectedRef.current),
+          eventCount: bridge.getSessionEventCount(prevSelectedRef.current!),
         })
+      }
+
+      prevSelectedRef.current = bridge.selectedSessionId
+
+      // For initial selection, DON'T restart — events are already flowing
+      // from the hub's auto-replay. Restarting would clear them.
+      if (isInitialSelection) {
+        return
       }
 
       // Restore or cold-start the incoming session, then flush events.
@@ -112,8 +126,6 @@ export function AgentVisualizer() {
         restart()
         bridge.flushSessionEvents(bridge.selectedSessionId)
       }
-
-      prevSelectedRef.current = bridge.selectedSessionId
     }
   }, [bridge.selectedSessionId, restart, bridge.flushSessionEvents, saveSnapshot, restoreSnapshot, bridge.getSessionEventCount])
 

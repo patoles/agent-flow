@@ -1,32 +1,35 @@
 {
-  "name": "agent-flow-web",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "build:webview": "vite build --config vite.config.webview.ts"
-  },
-  "dependencies": {
-    "@vercel/analytics": "1.6.1",
-    "d3-force": "^3.0.0",
-    "next": "16.1.6",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4.2.0",
-    "@tailwindcss/vite": "^4.2.2",
-    "@types/d3-force": "^3.0.10",
-    "@types/node": "^22",
-    "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
-    "postcss": "^8.5",
-    "tailwindcss": "^4.2.0",
-    "tw-animate-css": "1.3.3",
-    "typescript": "5.7.3",
-    "vite": "^8.0.1"
-  }
+    "name": "agent-flow-web",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "build:webview": "vite build --config vite.config.webview.ts",
+        "dev:standalone": "concurrently \"next dev\" \"node hook-server.mjs\""
+    },
+    "dependencies": {
+        "@vercel/analytics": "1.6.1",
+        "concurrently": "^9.2.1",
+        "d3-force": "^3.0.0",
+        "next": "16.1.6",
+        "react": "19.2.4",
+        "react-dom": "19.2.4",
+        "ws": "^8.20.0"
+    },
+    "devDependencies": {
+        "@tailwindcss/postcss": "^4.2.0",
+        "@tailwindcss/vite": "^4.2.2",
+        "@types/d3-force": "^3.0.10",
+        "@types/node": "^22",
+        "@types/react": "19.2.14",
+        "@types/react-dom": "19.2.3",
+        "@vitejs/plugin-react": "^6.0.1",
+        "postcss": "^8.5",
+        "tailwindcss": "^4.2.0",
+        "tw-animate-css": "1.3.3",
+        "typescript": "5.7.3",
+        "vite": "^8.0.1"
+    }
 }

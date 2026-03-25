@@ -81,3 +81,58 @@ Created by [Simon Patole](https://github.com/patoles), for [CraftMyGame](https:/
 Apache 2.0 — see [LICENSE](LICENSE) for details.
 
 The name "Agent Flow" and associated logos are trademarks of Simon Patole. See [TRADEMARK.md](TRADEMARK.md) for usage guidelines.
+
+## OpenClaw / Standalone Mode
+
+You can run Agent Flow as a standalone web app (without VS Code) and connect it to any Claude Code–compatible agent runtime, including [OpenClaw](https://openclaw.dev).
+
+### Architecture
+
+```
+Agent runtime (OpenClaw / Claude Code)
+        │  HTTP POST :7842
+        ▼
+  hook-server.mjs  ←── Receives hook events, translates to SimulationEvents
+        │  WebSocket :7850
+        ▼
+  Next.js browser  ←── Renders live graph
+```
+
+### Quick Start (OpenClaw)
+
+```bash
+# 1. Install dependencies
+cd web && npm install
+
+# 2. Start the standalone dev server (Next.js + hook server together)
+npm run dev:standalone
+
+# 3. In a separate terminal, run the OpenClaw bridge
+node scripts/openclaw-bridge.mjs
+
+# 4. Open http://localhost:3000
+```
+
+The bridge watches your active OpenClaw session JSONL and forwards events to the hook server, which streams them live to the browser.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOOK_SERVER_PORT` | `7842` | HTTP port for receiving hook events |
+| `HUB_SERVER_PORT` | `7850` | WebSocket port for browser clients |
+| `OPENCLAW_SESSION_DIR` | `~/.openclaw/agents/main/sessions` | Directory to watch for JSONL files |
+| `REPLAY_HISTORY` | `0` | Set to `1` to replay full session history on start |
+
+### Connecting Claude Code Directly
+
+Add to `~/.claude/settings.local.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse":  [{ "type": "command", "command": "curl -sf -X POST http://127.0.0.1:7842 -H 'Content-Type: application/json' -d @-" }],
+    "PostToolUse": [{ "type": "command", "command": "curl -sf -X POST http://127.0.0.1:7842 -H 'Content-Type: application/json' -d @-" }]
+  }
+}
+```

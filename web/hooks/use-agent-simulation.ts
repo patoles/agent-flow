@@ -166,6 +166,16 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     const deltaTime = Math.min((timestamp - lastTimeRef.current) / 1000, ANIM_SPEED.maxDeltaTime)
     lastTimeRef.current = timestamp
 
+    // Snapshot and consume external events OUTSIDE setState so that
+    // React StrictMode's double-invocation of the updater doesn't
+    // see an empty array on the second call (the first call would
+    // have cleared it via onExternalEventsConsumed).
+    let externalSnapshot: SimulationEvent[] | null = null
+    if (externalEvents && externalEvents.length > 0) {
+      externalSnapshot = externalEvents.slice()
+      onExternalEventsConsumed?.()
+    }
+
     setState(prev => {
       if (!prev.isPlaying) return prev
 
@@ -198,13 +208,9 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
         }
       }
 
-      // Process NEW external events (from VS Code bridge)
-      // Copy and clear immediately to prevent stale closures from
-      // reprocessing the same events across multiple animation frames
-      if (externalEvents && externalEvents.length > 0) {
-        const eventsToProcess = externalEvents.slice()
-        onExternalEventsConsumed?.()
-        for (const event of eventsToProcess) {
+      // Process NEW external events (from VS Code bridge / event hub)
+      if (externalSnapshot) {
+        for (const event of externalSnapshot) {
           // Filter by session if specified — use ref so we always read the
           // latest value even if the animate closure hasn't been recreated yet.
           // The ref is also updated synchronously via onSessionFilterChange callback
