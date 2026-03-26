@@ -90,7 +90,14 @@ export const ANIM_SPEED = {
   maxDeltaTime: 0.1,
   /** Default delta time when time info unavailable */
   defaultDeltaTime: 0.016,
+  /** Minimum ms between frames (60fps cap, with 1ms slack for timing jitter) */
+  minFrameInterval: (1000 / 60) - 1,
 } as const
+
+// ─── UI panel constants ─────────────────────────────────────────────────────
+
+/** Distance from bottom (px) before a scroll container is considered "at bottom" */
+export const AUTO_SCROLL_THRESHOLD = 60
 
 // ─── Camera / interaction constants ─────────────────────────────────────────
 
@@ -347,6 +354,34 @@ export const PARTICLE_DRAW = {
   labelMaxT: 0.8,
   labelFontSize: 8,
   labelYOffset: -12,
+} as const
+
+// ─── Performance overlay constants (debug only, ?perf or ?stress) ────────────
+
+/** Cached once at module load — avoids parsing location.search every frame */
+export const PERF_OVERLAY_ENABLED = typeof window !== 'undefined'
+  && (() => {
+    const p = new URLSearchParams(window.location.search)
+    return p.has('perf') || p.has('stress')
+  })()
+
+export const PERF_OVERLAY = {
+  x: 8,
+  y: 8,
+  width: 260,
+  height: 140,
+  padding: 8,
+  lineHeight: 18,
+  font: '12px monospace',
+  maxFrameSamples: 120,
+  fpsWarning: 30,
+  fpsCaution: 50,
+  updateIntervalMs: 1000,
+  bgColor: 'rgba(0, 0, 0, 0.75)',
+  fpsGoodColor: '#44ff44',
+  fpsCautionColor: '#ffaa00',
+  fpsWarningColor: '#ff4444',
+  textColor: '#cccccc',
 } as const
 
 // ─── Hit detection constants ────────────────────────────────────────────────

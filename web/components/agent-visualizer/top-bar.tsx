@@ -1,6 +1,7 @@
 "use client"
 
-import { Agent, Z } from "@/lib/agent-types"
+import { memo } from "react"
+import { Z } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
 import { formatTokens } from "@/lib/utils"
 import { agentCost } from "./canvas/draw-cost"
@@ -86,7 +87,7 @@ export interface TopBarProps {
   isVSCode: boolean
   connectionStatus: ConnectionStatus
   // Stats
-  agents: Map<string, Agent>
+  agentCount: number
   totalTokens: number
   // Panel toggles
   showFileAttention: boolean
@@ -99,11 +100,11 @@ export interface TopBarProps {
   onToggleMute: () => void
 }
 
-export function TopBar({
+export const TopBar = memo(function TopBar({
   sessions, selectedSessionId, sessionsWithActivity,
   onSelectSession, onCloseSession,
   isVSCode, connectionStatus,
-  agents, totalTokens,
+  agentCount, totalTokens,
   showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
   onTogglePanel, onToggleTimeline, onToggleMute,
 }: TopBarProps) {
@@ -128,7 +129,7 @@ export function TopBar({
       {/* Right-side info/controls */}
       <div className="flex items-center gap-4 flex-shrink-0" style={{ color: COLORS.textMuted }}>
         {isVSCode && <ConnectionIndicator status={connectionStatus} />}
-        <span>{agents.size} agents</span>
+        <span>{agentCount} agents</span>
         <span>
           {formatTokens(totalTokens)} tokens
           <span style={{ color: COLORS.complete + '65', marginLeft: 4 }}>
@@ -161,4 +162,4 @@ export function TopBar({
       </div>
     </div>
   )
-}
+})

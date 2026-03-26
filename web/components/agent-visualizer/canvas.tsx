@@ -1,9 +1,10 @@
 'use client'
 
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { Agent, ToolCallNode, Particle, Edge, Discovery, DepthParticle } from '@/lib/agent-types'
+import { Agent, Particle, Edge, Discovery, DepthParticle } from '@/lib/agent-types'
+import type { SimulationState } from '@/hooks/simulation/types'
 import { getStateColor } from '@/lib/colors'
-import { ANIM_SPEED } from '@/lib/canvas-constants'
+import { ANIM_SPEED, PERF_OVERLAY, PERF_OVERLAY_ENABLED } from '@/lib/canvas-constants'
 import { BloomRenderer } from './bloom-renderer'
 import { createDepthParticles, updateDepthParticles, drawBackground } from './background-layer'
 import {
@@ -23,11 +24,8 @@ import { useCanvasCamera } from '@/hooks/use-canvas-camera'
 import { useCanvasInteraction } from '@/hooks/use-canvas-interaction'
 
 interface CanvasProps {
-  agents: Map<string, Agent>
-  toolCalls: Map<string, ToolCallNode>
-  particles: Particle[]
-  edges: Edge[]
-  discoveries: Discovery[]
+  /** Ref to simulation state — read every frame without React re-renders */
+  simulationRef: React.RefObject<SimulationState>
   selectedAgentId: string | null
   hoveredAgentId: string | null
   showStats: boolean
@@ -42,14 +40,13 @@ interface CanvasProps {
   selectedToolCallId?: string | null
   onDiscoveryClick?: (discoveryId: string | null) => void
   selectedDiscoveryId?: string | null
-  currentTime?: number
   showCostOverlay?: boolean
 }
 
 export function AgentCanvas({
-  agents, toolCalls, particles, edges, discoveries,
+  simulationRef,
   selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
-  onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, currentTime: simTime, showCostOverlay,
+  onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, showCostOverlay,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -70,6 +67,16 @@ export function AgentCanvas({
   // Rate-limited error logging for the draw loop (avoid flooding console)
   const lastDrawErrorRef = useRef(0)
 
+  // Performance overlay state
+  const perfRef = useRef({
+    frames: 0,
+    lastFpsUpdate: 0,
+    fps: 0,
+    frameTimeMs: 0,
+    frameTimes: [] as number[],
+    p95: 0,
+  })
+
   // Caches for per-frame lookups — avoid rebuilding Set/Map every ~16ms
   const edgeLookupCacheRef = useRef<{
     particles: Particle[]
@@ -79,11 +86,15 @@ export function AgentCanvas({
   }>({ particles: [], edges: [], activeEdgeIds: new Set(), edgeMap: new Map() })
 
   // ─── Stable refs for animation loop & event handlers ────────────────────
+  // Simulation data (agents, particles, etc.) is synced from simulationRef
+  // at the top of each draw frame, so it's always fresh even without re-renders.
+  const sim = simulationRef.current
   const makeDrawProps = (prev?: { isDragging: boolean }) => ({
-    agents, toolCalls, particles, edges, discoveries,
+    agents: sim.agents, toolCalls: sim.toolCalls,
+    particles: sim.particles, edges: sim.edges, discoveries: sim.discoveries,
     selectedAgentId, hoveredAgentId, showStats, showHexGrid,
     showCostOverlay, selectedToolCallId, selectedDiscoveryId,
-    simTime, pauseAutoFit, dimensions,
+    simTime: sim.currentTime, pauseAutoFit, dimensions,
     onAgentDrag, onAgentClick, onAgentHover, onContextMenu,
     onToolCallClick, onDiscoveryClick,
     isDragging: prev?.isDragging ?? false,
@@ -97,7 +108,7 @@ export function AgentCanvas({
     screenToCanvas, doZoomToFit, updateCamera,
   } = useCanvasCamera({
     mainCanvasRef, drawPropsRef, simTimeRef, dimensions,
-    agentCount: agents.size, zoomToFitTrigger, selectedAgentId,
+    agentCount: sim.agents.size, zoomToFitTrigger, selectedAgentId,
   })
 
   // ─── Interaction ────────────────────────────────────────────────────────
@@ -165,102 +176,150 @@ export function AgentCanvas({
     if (!ctx) return
 
     try {
-    const {
-      agents, toolCalls, particles, edges, discoveries,
-      selectedAgentId, hoveredAgentId, showStats, showHexGrid,
-      showCostOverlay, selectedToolCallId, selectedDiscoveryId,
-      simTime, pauseAutoFit, dimensions, onAgentDrag,
-      isDragging,
-    } = drawPropsRef.current
-    const transform = transformRef.current
+      // Sync simulation data from ref — always fresh, independent of React renders
+      {
+        const s = simulationRef.current
+        const p = drawPropsRef.current
+        p.agents = s.agents
+        p.toolCalls = s.toolCalls
+        p.particles = s.particles
+        p.edges = s.edges
+        p.discoveries = s.discoveries
+        p.simTime = s.currentTime
+      }
 
-    const deltaTime = lastFrameTimeRef.current ? (timestamp - lastFrameTimeRef.current) / 1000 : ANIM_SPEED.defaultDeltaTime
-    lastFrameTimeRef.current = timestamp
-    timeRef.current += deltaTime
-    if (simTime != null) simTimeRef.current = simTime
+      const {
+        agents, toolCalls, particles, edges, discoveries,
+        selectedAgentId, hoveredAgentId, showStats, showHexGrid,
+        showCostOverlay, selectedToolCallId, selectedDiscoveryId,
+        simTime, pauseAutoFit, dimensions, onAgentDrag,
+        isDragging,
+      } = drawPropsRef.current
+      const transform = transformRef.current
 
-    const dpr = dprRef.current
-    const w = dimensions.width
-    const h = dimensions.height
+      const deltaTime = lastFrameTimeRef.current ? (timestamp - lastFrameTimeRef.current) / 1000 : ANIM_SPEED.defaultDeltaTime
+      lastFrameTimeRef.current = timestamp
+      timeRef.current += deltaTime
+      if (simTime != null) simTimeRef.current = simTime
 
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-      canvas.width = w * dpr
-      canvas.height = h * dpr
-      ctx.scale(dpr, dpr)
-    }
+      const dpr = dprRef.current
+      const w = dimensions.width
+      const h = dimensions.height
 
-    // Camera physics (inertia + auto-fit)
-    updateCamera(isDragging, pauseAutoFit)
+      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+        canvas.width = w * dpr
+        canvas.height = h * dpr
+        ctx.scale(dpr, dpr)
+      }
 
-    // Floaty agent drag
-    updateDragLerp(agents, onAgentDrag)
+      // Camera physics (inertia + auto-fit)
+      updateCamera(isDragging, pauseAutoFit)
 
-    // Detect state changes → visual effects
-    detectStateChanges()
+      // Floaty agent drag
+      updateDragLerp(agents, onAgentDrag)
 
-    // Update effects (mutate in place to avoid GC pressure)
-    {
-      const effects = effectsRef.current
-      let writeIdx = 0
-      for (let i = 0; i < effects.length; i++) {
-        effects[i].age += deltaTime
-        if (effects[i].age < effects[i].duration) {
-          if (writeIdx !== i) effects[writeIdx] = effects[i]
-          writeIdx++
+      // Detect state changes → visual effects
+      detectStateChanges()
+
+      // Update effects (mutate in place to avoid GC pressure)
+      {
+        const effects = effectsRef.current
+        let writeIdx = 0
+        for (let i = 0; i < effects.length; i++) {
+          effects[i].age += deltaTime
+          if (effects[i].age < effects[i].duration) {
+            if (writeIdx !== i) effects[writeIdx] = effects[i]
+            writeIdx++
+          }
+        }
+        effects.length = writeIdx
+      }
+
+      ctx.clearRect(0, 0, w, h)
+      updateDepthParticles(depthParticlesRef.current, deltaTime, w, h)
+
+      let activeAgentPos: { x: number; y: number; color: string } | undefined
+      for (const [, agent] of agents) {
+        if (agent.state === 'thinking' || agent.state === 'tool_calling' || agent.state === 'waiting_permission') {
+          activeAgentPos = { x: agent.x, y: agent.y, color: getStateColor(agent.state) }
+          break
         }
       }
-      effects.length = writeIdx
-    }
 
-    ctx.clearRect(0, 0, w, h)
-    updateDepthParticles(depthParticlesRef.current, deltaTime, w, h)
+      drawBackground(ctx, w, h, depthParticlesRef.current, transform, showHexGrid, timeRef.current, activeAgentPos)
 
-    let activeAgentPos: { x: number; y: number; color: string } | undefined
-    for (const [, agent] of agents) {
-      if (agent.state === 'thinking' || agent.state === 'tool_calling' || agent.state === 'waiting_permission') {
-        activeAgentPos = { x: agent.x, y: agent.y, color: getStateColor(agent.state) }
-        break
+      ctx.save()
+      ctx.translate(transform.x, transform.y)
+      ctx.scale(transform.scale, transform.scale)
+
+      // Pre-compute shared lookup structures — cached across frames when inputs are unchanged
+      const elCache = edgeLookupCacheRef.current
+      let activeEdgeIds: Set<string>
+      let edgeMap: Map<string, Edge>
+      if (elCache.particles === particles && elCache.edges === edges) {
+        activeEdgeIds = elCache.activeEdgeIds
+        edgeMap = elCache.edgeMap
+      } else {
+        activeEdgeIds = getActiveEdgeIds(particles)
+        edgeMap = buildEdgeMap(edges)
+        edgeLookupCacheRef.current = { particles, edges, activeEdgeIds, edgeMap }
       }
-    }
 
-    drawBackground(ctx, w, h, depthParticlesRef.current, transform, showHexGrid, timeRef.current, activeAgentPos)
+      drawDiscoveryConnections(ctx, discoveries, agents)
+      drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
+      drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
+      drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
+      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current)
+      drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
+      if (showCostOverlay) drawCostLabels(ctx, agents, toolCalls)
+      drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
+      drawEffects(ctx, effectsRef.current)
 
-    ctx.save()
-    ctx.translate(transform.x, transform.y)
-    ctx.scale(transform.scale, transform.scale)
+      if (selectedAgentId) {
+        const agent = agents.get(selectedAgentId)
+        if (agent) drawTetherLine(ctx, agent, transform, h)
+      }
 
-    // Pre-compute shared lookup structures — cached across frames when inputs are unchanged
-    const elCache = edgeLookupCacheRef.current
-    let activeEdgeIds: Set<string>
-    let edgeMap: Map<string, Edge>
-    if (elCache.particles === particles && elCache.edges === edges) {
-      activeEdgeIds = elCache.activeEdgeIds
-      edgeMap = elCache.edgeMap
-    } else {
-      activeEdgeIds = getActiveEdgeIds(particles)
-      edgeMap = buildEdgeMap(edges)
-      edgeLookupCacheRef.current = { particles, edges, activeEdgeIds, edgeMap }
-    }
+      ctx.restore()
 
-    drawDiscoveryConnections(ctx, discoveries, agents)
-    drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
-    drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
-    drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
-    drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current)
-    drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
-    if (showCostOverlay) drawCostLabels(ctx, agents, toolCalls)
-    drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
-    drawEffects(ctx, effectsRef.current)
+      if (showCostOverlay) drawCostSummaryPanel(ctx, agents, toolCalls)
+      if (bloomRef.current) bloomRef.current.apply(canvas, ctx)
 
-    if (selectedAgentId) {
-      const agent = agents.get(selectedAgentId)
-      if (agent) drawTetherLine(ctx, agent, transform, h)
-    }
+      // ─── Performance overlay (enabled via ?perf or ?stress) ──────────
+      if (PERF_OVERLAY_ENABLED) {
+        const perf = perfRef.current
+        const frameEnd = performance.now()
+        const frameMs = frameEnd - (timestamp || frameEnd)
+        perf.frameTimes.push(frameMs)
+        if (perf.frameTimes.length > PERF_OVERLAY.maxFrameSamples) perf.frameTimes.shift()
+        perf.frames++
+        perf.frameTimeMs = frameMs
+        if (frameEnd - perf.lastFpsUpdate >= PERF_OVERLAY.updateIntervalMs) {
+          perf.fps = perf.frames
+          perf.frames = 0
+          perf.lastFpsUpdate = frameEnd
+          const sorted = [...perf.frameTimes].sort((a, b) => a - b)
+          perf.p95 = sorted[Math.floor(sorted.length * 0.95)] || 0
+        }
+        const po = PERF_OVERLAY
+        const textX = po.x + po.padding
+        let textY = po.y + po.lineHeight + 2
+        ctx.save()
+        ctx.fillStyle = po.bgColor
+        ctx.fillRect(po.x, po.y, po.width, po.height)
+        ctx.font = po.font
+        ctx.fillStyle = perf.fps < po.fpsWarning ? po.fpsWarningColor : perf.fps < po.fpsCaution ? po.fpsCautionColor : po.fpsGoodColor
+        ctx.fillText(`FPS: ${perf.fps}`, textX, textY); textY += po.lineHeight
+        ctx.fillStyle = po.textColor
+        ctx.fillText(`Frame: ${frameMs.toFixed(1)}ms  P95: ${perf.p95.toFixed(1)}ms`, textX, textY); textY += po.lineHeight
+        ctx.fillText(`Agents: ${agents.size}`, textX, textY); textY += po.lineHeight
+        ctx.fillText(`Tool calls: ${toolCalls.size}`, textX, textY); textY += po.lineHeight
+        ctx.fillText(`Particles: ${particles.length}`, textX, textY); textY += po.lineHeight
+        ctx.fillText(`Edges: ${edges.length}`, textX, textY); textY += po.lineHeight
+        ctx.fillText(`Discoveries: ${discoveries.length}`, textX, textY)
+        ctx.restore()
+      }
 
-    ctx.restore()
-
-    if (showCostOverlay) drawCostSummaryPanel(ctx, agents, toolCalls)
-    if (bloomRef.current) bloomRef.current.apply(canvas, ctx)
     } catch (err) {
       // Log at most once every 5s to avoid flooding the console
       const now = Date.now()

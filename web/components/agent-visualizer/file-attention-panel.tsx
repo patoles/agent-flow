@@ -13,6 +13,8 @@ interface FileAttentionPanelProps {
 }
 
 export function FileAttentionPanel({ visible, fileAttention, onClose, onOpenFile }: FileAttentionPanelProps) {
+  if (!visible) return null
+
   const files = Array.from(fileAttention.values())
     .sort((a, b) => b.totalTokens - a.totalTokens)
 
@@ -85,9 +87,13 @@ export function FileAttentionPanel({ visible, fileAttention, onClose, onOpenFile
                       {file.edits} edit{file.edits > 1 ? 's' : ''}
                     </span>
                   )}
-                  <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}>
-                    {file.agents.join(', ')}
-                  </span>
+                  {file.agents.length > 0 && (
+                    <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}
+                      title={file.agents.join(', ')}
+                    >
+                      {file.agents.length} agent{file.agents.length > 1 ? 's' : ''}
+                    </span>
+                  )}
                 </div>
               </div>
             )

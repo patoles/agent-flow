@@ -5,6 +5,7 @@ import { Agent, Z, type AgentState } from '@/lib/agent-types'
 import { COLORS, ROLE_COLORS, getStateColor } from '@/lib/colors'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { useClickOutside } from '@/hooks/use-click-outside'
+import { useVirtualList } from '@/hooks/use-virtual-list'
 
 interface MessageFeedPanelProps {
   conversations: Map<string, ConversationMessage[]>
@@ -21,7 +22,10 @@ const COLLAPSED_AGENT_NAME_MAX = 12
 const TAB_AGENT_NAME_MAX = 14
 const PREVIEW_MAX = 50
 const MESSAGE_TRUNCATE_MAX = 120
-const AUTO_SCROLL_THRESHOLD = 60
+
+const MESSAGE_GAP = 4
+
+// ─── Main component ─────────────────────────────────────────────────────────
 
 export function MessageFeedPanel({
   conversations,
@@ -38,15 +42,34 @@ export function MessageFeedPanel({
   agentsRef.current = agents
 
   // Stable key that only changes when agent set membership or names change
-  // (not on every position/opacity animation tick)
   const agentKey = useMemo(() => {
     const parts: string[] = []
     for (const [id, a] of agents) parts.push(`${id}:${a.name}:${a.isMain}`)
     return parts.sort().join('|')
   }, [agents])
 
-  // Agents that exist in the current session AND have text messages
+  // ── Latest message (cheap — used by collapsed view) ──
+  const latestMessage = useMemo(() => {
+    const currentAgents = agentsRef.current
+    let latest: (ConversationMessage & { agentId: string }) | null = null
+    for (const [agentId, msgs] of conversations) {
+      if (!currentAgents.has(agentId)) continue
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (!TEXT_TYPES.has(msgs[i].type)) continue
+        if (!latest || msgs[i].timestamp > latest.timestamp) {
+          latest = { ...msgs[i], agentId }
+        }
+        break
+      }
+    }
+    return latest
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, agentKey])
+
+  // ── Expensive memos — only compute when expanded ──
+
   const agentsWithMessages = useMemo(() => {
+    if (!expanded) return []
     const currentAgents = agentsRef.current
     const ids: string[] = []
     for (const [agentId, msgs] of conversations) {
@@ -60,50 +83,67 @@ export function MessageFeedPanel({
       if (agB?.isMain) return 1
       return (agA?.name ?? a).localeCompare(agB?.name ?? b)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- agentKey is a stable proxy for agents
-  }, [conversations, agentKey])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded ? conversations : null, expanded, agentKey])
 
-  // Text-only messages for the active tab
+  // Incremental message cache
+  const messagesCacheRef = useRef<{
+    key: string
+    counts: Map<string, number>
+    result: (ConversationMessage & { agentId: string })[]
+  }>({ key: '', counts: new Map(), result: [] })
+
   const messages = useMemo(() => {
+    if (!expanded) return []
     const currentAgents = agentsRef.current
+    const cache = messagesCacheRef.current
+    const cacheKey = `${activeTab}:${agentKey}`
+
+    if (cache.key !== cacheKey) {
+      cache.key = cacheKey
+      cache.counts = new Map()
+      cache.result = []
+    }
+
     if (activeTab === 'all') {
-      const all: (ConversationMessage & { agentId: string })[] = []
+      let appended = false
       for (const [agentId, msgs] of conversations) {
         if (!currentAgents.has(agentId)) continue
-        for (const msg of msgs) {
-          if (TEXT_TYPES.has(msg.type)) all.push({ ...msg, agentId })
+        const prevLen = cache.counts.get(agentId) ?? 0
+        if (msgs.length > prevLen) {
+          for (let i = prevLen; i < msgs.length; i++) {
+            if (TEXT_TYPES.has(msgs[i].type)) cache.result.push({ ...msgs[i], agentId })
+          }
+          cache.counts.set(agentId, msgs.length)
+          appended = true
         }
       }
-      return all.sort((a, b) => a.timestamp - b.timestamp)
+      if (appended) cache.result.sort((a, b) => a.timestamp - b.timestamp)
+      return cache.result
     }
-    return (conversations.get(activeTab) ?? [])
-      .filter(m => TEXT_TYPES.has(m.type))
-      .map(msg => ({ ...msg, agentId: activeTab }))
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- agentKey is a stable proxy for agents
-  }, [conversations, activeTab, agentKey])
 
-  // Latest text message (for collapsed view)
-  const latestMessage = useMemo(() => {
-    const currentAgents = agentsRef.current
-    let latest: (ConversationMessage & { agentId: string }) | null = null
-    for (const [agentId, msgs] of conversations) {
-      if (!currentAgents.has(agentId)) continue
-      for (const msg of msgs) {
-        if (!TEXT_TYPES.has(msg.type)) continue
-        if (!latest || msg.timestamp > latest.timestamp) {
-          latest = { ...msg, agentId }
-        }
+    const msgs = conversations.get(activeTab) ?? []
+    const prevLen = cache.counts.get(activeTab) ?? 0
+    if (msgs.length > prevLen) {
+      for (let i = prevLen; i < msgs.length; i++) {
+        if (TEXT_TYPES.has(msgs[i].type)) cache.result.push({ ...msgs[i], agentId: activeTab })
       }
+      cache.counts.set(activeTab, msgs.length)
     }
-    return latest
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- agentKey is a stable proxy for agents
-  }, [conversations, agentKey])
+    return cache.result
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded ? conversations : null, expanded, activeTab, agentKey])
+
+  // Virtual list with auto-scroll
+  const {
+    visibleItems, totalHeight, offsetTop,
+    handleScroll, measureRef,
+  } = useVirtualList(messages, logRef, { gap: MESSAGE_GAP, autoScroll: true })
 
   // Track unread messages per agent tab
   useEffect(() => {
     const totalCount = Array.from(conversations.values()).reduce((n, msgs) => n + msgs.length, 0)
     if (totalCount > prevCountRef.current && expanded) {
-      // Find which agents got new messages
       for (const [agentId, msgs] of conversations) {
         if (agentId !== activeTab && activeTab !== 'all' && msgs.length > 0) {
           setUnread(prev => new Set(prev).add(agentId))
@@ -113,67 +153,33 @@ export function MessageFeedPanel({
     prevCountRef.current = totalCount
   }, [conversations, expanded, activeTab])
 
-  // Clear unread when switching tabs
   useEffect(() => {
     if (activeTab !== 'all') {
-      setUnread(prev => {
-        const next = new Set(prev)
-        next.delete(activeTab)
-        return next
-      })
+      setUnread(prev => { const next = new Set(prev); next.delete(activeTab); return next })
     } else {
       setUnread(new Set())
     }
   }, [activeTab])
 
-  // Reset tab when the active agent no longer exists (e.g. session switch)
   useEffect(() => {
-    if (activeTab !== 'all' && !conversations.has(activeTab)) {
-      setActiveTab('all')
-    }
+    if (activeTab !== 'all' && !conversations.has(activeTab)) setActiveTab('all')
   }, [conversations, activeTab])
 
-  // Auto-switch tab when an agent is selected
   useEffect(() => {
     if (selectedAgentId) {
       const selected = agentsRef.current.get(selectedAgentId)
-      if (selected && !selected.isMain) {
-        // Focus on the subagent's tab (don't auto-expand — may overlap detail card)
-        setActiveTab(selectedAgentId)
-      } else {
-        setActiveTab('all')
-      }
+      if (selected && !selected.isMain) setActiveTab(selectedAgentId)
+      else setActiveTab('all')
     } else {
       setActiveTab('all')
     }
   }, [selectedAgentId])
 
-  // Auto-scroll on new messages
-  useEffect(() => {
-    if (expanded && logRef.current) {
-      const el = logRef.current
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < AUTO_SCROLL_THRESHOLD
-      if (nearBottom) {
-        el.scrollTop = el.scrollHeight
-      }
-    }
-  }, [messages.length, expanded])
-
-  // Scroll to bottom when first expanded
-  const prevExpandedRef = useRef(false)
-  useEffect(() => {
-    if (expanded && !prevExpandedRef.current && logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight
-    }
-    prevExpandedRef.current = expanded
-  }, [expanded])
-
-  // Click outside to collapse
   const panelRef = useRef<HTMLDivElement>(null)
   const collapsePanel = useCallback(() => setExpanded(false), [])
   useClickOutside(panelRef, collapsePanel)
 
-  if (agentsWithMessages.length === 0 && !latestMessage) return null
+  if (!latestMessage && agentsWithMessages.length === 0) return null
 
   // ── Collapsed ──
   if (!expanded) {
@@ -190,28 +196,20 @@ export function MessageFeedPanel({
         onClick={() => setExpanded(true)}
       >
         <div className="glass-card px-3 py-2 flex items-center gap-2" style={{ maxWidth: 320 }}>
-          <div
-            className="w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ background: role.text }}
-          />
+          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: role.text }} />
           <span className="text-[9px] font-mono font-semibold shrink-0" style={{ color: COLORS.textPrimary }}>
             {agentName.length > COLLAPSED_AGENT_NAME_MAX ? agentName.slice(0, COLLAPSED_AGENT_NAME_MAX) + '..' : agentName}
           </span>
-          <span
-            className="text-[9px] font-mono truncate"
-            style={{ color: role.text + 'cc' }}
-          >
+          <span className="text-[9px] font-mono truncate" style={{ color: role.text + 'cc' }}>
             {preview}{latestMessage.content.length > PREVIEW_MAX ? '...' : ''}
           </span>
-          <span className="text-[9px] shrink-0" style={{ color: COLORS.textMuted }}>
-            ▾
-          </span>
+          <span className="text-[9px] shrink-0" style={{ color: COLORS.textMuted }}>▾</span>
         </div>
       </div>
     )
   }
 
-  // ── Expanded ──
+  // ── Expanded (virtualized) ──
   return (
     <div
       ref={panelRef}
@@ -261,10 +259,11 @@ export function MessageFeedPanel({
         </div>
         )}
 
-        {/* Message List */}
+        {/* Message List (virtualized) */}
         <div
           ref={logRef}
-          className="flex-1 overflow-y-auto px-2 pb-2 space-y-1"
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-2 pb-2"
           style={{ maxHeight: 340, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
         >
           {messages.length === 0 ? (
@@ -274,17 +273,26 @@ export function MessageFeedPanel({
               </span>
             </div>
           ) : (
-            messages.map((msg) => (
-              <MessageRow
-                key={msg.id}
-                message={msg}
-                agentId={msg.agentId}
-                agentName={agents.get(msg.agentId)?.name ?? msg.agentId}
-                showAgent={activeTab === 'all'}
-                isSelected={selectedAgentId === msg.agentId}
-                onClick={() => { onAgentClick(msg.agentId); setExpanded(false) }}
-              />
-            ))
+            <div style={{ height: totalHeight, position: 'relative' }}>
+              <div style={{ position: 'absolute', top: offsetTop, left: 0, right: 0 }}>
+                {visibleItems.map((msg) => (
+                  <div
+                    key={msg.id}
+                    ref={(el) => measureRef(msg.id, el)}
+                    style={{ marginBottom: MESSAGE_GAP }}
+                  >
+                    <MessageRow
+                      message={msg}
+                      agentId={msg.agentId}
+                      agentName={agents.get(msg.agentId)?.name ?? msg.agentId}
+                      showAgent={activeTab === 'all'}
+                      isSelected={selectedAgentId === msg.agentId}
+                      onClick={() => { onAgentClick(msg.agentId); setExpanded(false) }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>

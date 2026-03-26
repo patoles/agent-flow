@@ -46,15 +46,21 @@ const EventMarkers = memo(function EventMarkers({ events, totalDuration, classNa
   events: TimelineEvent[]
   totalDuration: number
   className?: string
+  /** Pass events.length to bust memo when array is mutated in place */
+  eventCount?: number
 }) {
   // Down-sample to MAX_SCRUBBER_DOTS evenly spaced events when list is large
   const visible = events.length > MAX_SCRUBBER_DOTS
     ? Array.from({ length: MAX_SCRUBBER_DOTS }, (_, i) => events[Math.floor(i * events.length / MAX_SCRUBBER_DOTS)])
     : events
+  // Position dots relative to the last event so they always span the full bar,
+  // rather than compressing into a fraction when currentTime runs ahead of events
+  const lastEventTime = events.length > 0 ? events[events.length - 1].timestamp : 0
+  const effectiveDuration = lastEventTime > 0 ? lastEventTime : totalDuration
   return (
     <>
       {visible.map((event) => {
-        const pos = totalDuration > 0 ? (event.timestamp / totalDuration) * 100 : 0
+        const pos = effectiveDuration > 0 ? (event.timestamp / effectiveDuration) * 100 : 0
         if (pos < 0 || pos > 100) return null
         return (
           <div
@@ -131,7 +137,7 @@ function LiveControlBar({
             className="w-full rounded-full relative"
             style={{ height: 3, background: COLORS.holoBg10 }}
           >
-            <EventMarkers events={scrubberEvents} totalDuration={totalDuration} className="opacity-80" />
+            <EventMarkers events={scrubberEvents} totalDuration={totalDuration} eventCount={scrubberEvents.length} className="opacity-80" />
           </div>
         </div>
 
@@ -241,6 +247,7 @@ function ReviewControlBar({
             <EventMarkers
               events={scrubberEvents}
               totalDuration={totalDuration}
+              eventCount={scrubberEvents.length}
               className="opacity-60 group-hover:opacity-100 transition-opacity"
             />
           </div>

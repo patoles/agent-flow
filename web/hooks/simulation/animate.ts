@@ -102,13 +102,10 @@ function cleanupFaded(
     filteredEdges = filteredEdges.filter(e => !fadedSet.has(e.from) && !fadedSet.has(e.to))
   }
 
-  // Cleanup faded tool calls and their edges
+  // Cleanup faded tool calls (opacity <= 0) and their edges
   const fadedToolIds: string[] = []
-  for (const e of filteredEdges) {
-    if (e.type === 'tool') {
-      const tc = newToolCalls.get(e.to)
-      if (tc && tc.opacity <= 0) fadedToolIds.push(e.to)
-    }
+  for (const [id, tc] of newToolCalls) {
+    if (tc.opacity <= 0) fadedToolIds.push(id)
   }
   if (fadedToolIds.length > 0) {
     if (newToolCalls === originalToolCalls) newToolCalls = new Map(originalToolCalls)

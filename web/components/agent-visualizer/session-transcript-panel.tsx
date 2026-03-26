@@ -6,9 +6,14 @@ import { COLORS } from '@/lib/colors'
 import { TranscriptMessage } from './transcript-message'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { CloseButton, SlidingPanel, stopPropagationHandlers } from './shared-ui'
-import { useAutoScroll } from '@/hooks/use-auto-scroll'
+import { useVirtualList } from '@/hooks/use-virtual-list'
 
-// ─── Full session transcript panel ───────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const TRANSCRIPT_GAP = 8 // matches mb-2
+const TRANSCRIPT_INITIAL_VIEWPORT = 400
+
+// ─── Component ──────────────────────────────────────────────────────────────
 
 interface TranscriptPanelProps {
   visible: boolean
@@ -24,20 +29,33 @@ export function SessionTranscriptPanel({
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
-  const { ref: logRef, handleScroll, scrollToBottom, isAutoScrolling } = useAutoScroll(conversation.length, visible)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Focus search when shown
   useEffect(() => {
     if (showSearch) searchRef.current?.focus()
   }, [showSearch])
 
-  const filteredConversation = searchQuery.trim()
-    ? conversation.filter(msg => {
-        const q = searchQuery.toLowerCase()
-        return msg.content.toLowerCase().includes(q)
-          || (msg.toolName || '').toLowerCase().includes(q)
-      })
-    : conversation
+  const filteredConversation = visible
+    ? (searchQuery.trim()
+        ? conversation.filter(msg => {
+            const q = searchQuery.toLowerCase()
+            return msg.content.toLowerCase().includes(q)
+              || (msg.toolName || '').toLowerCase().includes(q)
+          })
+        : conversation)
+    : []
+
+  const {
+    visibleItems, totalHeight, offsetTop,
+    handleScroll, measureRef: itemMeasureRef,
+    isAtBottom, scrollToBottom,
+  } = useVirtualList(filteredConversation, scrollRef, {
+    gap: TRANSCRIPT_GAP,
+    initialViewportHeight: TRANSCRIPT_INITIAL_VIEWPORT,
+    autoScroll: true,
+  })
+
+  if (!visible) return null
 
   return (
     <SlidingPanel
@@ -106,11 +124,11 @@ export function SessionTranscriptPanel({
           </div>
         )}
 
-        {/* Messages */}
+        {/* Virtualized message list */}
         <div
-          ref={logRef}
+          ref={scrollRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-3 py-2 space-y-2"
+          className="flex-1 overflow-y-auto px-3 py-2"
           style={{ scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
         >
           {filteredConversation.length === 0 ? (
@@ -120,29 +138,38 @@ export function SessionTranscriptPanel({
               </p>
             </div>
           ) : (
-            filteredConversation.map((msg) => (
-              <TranscriptMessage key={msg.id} message={msg} searchQuery={searchQuery} />
-            ))
-          )}
-
-          {/* Scroll-to-bottom indicator */}
-          {!isAutoScrolling.current && filteredConversation.length > 0 && (
-            <div className="sticky bottom-0 flex justify-center py-1">
-              <button
-                onClick={scrollToBottom}
-                className="text-[9px] font-mono px-3 py-1 rounded-full transition-all"
-                style={{
-                  background: COLORS.holoBg10,
-                  border: `1px solid ${COLORS.glassBorder}`,
-                  color: COLORS.scrollBtnText,
-                }}
-              >
-                ↓ New messages
-              </button>
+            <div style={{ height: totalHeight, position: 'relative' }}>
+              <div style={{ position: 'absolute', top: offsetTop, left: 0, right: 0 }}>
+                {visibleItems.map((msg) => (
+                  <div
+                    key={msg.id}
+                    ref={(el) => itemMeasureRef(msg.id, el)}
+                    style={{ marginBottom: TRANSCRIPT_GAP }}
+                  >
+                    <TranscriptMessage message={msg} searchQuery={searchQuery} />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
+        {/* Scroll-to-bottom button */}
+        {!isAtBottom && filteredConversation.length > 0 && (
+          <div className="flex justify-center py-1 flex-shrink-0" style={{ borderTop: `1px solid ${COLORS.holoBorder06}` }}>
+            <button
+              onClick={scrollToBottom}
+              className="text-[9px] font-mono px-3 py-1 rounded-full transition-all"
+              style={{
+                background: COLORS.holoBg10,
+                border: `1px solid ${COLORS.glassBorder}`,
+                color: COLORS.scrollBtnText,
+              }}
+            >
+              ↓ New messages
+            </button>
+          </div>
+        )}
       </div>
     </SlidingPanel>
   )

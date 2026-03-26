@@ -29,6 +29,7 @@ export function AgentVisualizer() {
   const bridge = useVSCodeBridge()
 
   const {
+    frameRef,
     agents,
     toolCalls,
     particles,
@@ -117,24 +118,35 @@ export function AgentVisualizer() {
     }
   }, [bridge.selectedSessionId, restart, bridge.flushSessionEvents, saveSnapshot, restoreSnapshot, bridge.getSessionEventCount])
 
-  // Timeline events
-  const timelineEvents = useMemo((): TimelineEvent[] => {
-    const events: TimelineEvent[] = []
-    let eventIndex = 0
+  // Timeline events — incremental: only processes new conversation messages
+  const timelineCacheRef = useRef<{
+    counts: Map<string, number>
+    events: TimelineEvent[]
+    idCounter: number
+  }>({ counts: new Map(), events: [], idCounter: 0 })
 
-    for (const [agentId, convMessages] of conversations) {
-      for (const msg of convMessages) {
-        events.push({
-          id: `event-${eventIndex++}`,
-          type: msg.type === 'tool_call' ? 'tool_call' : msg.type === 'tool_result' ? 'tool_result' : 'message',
-          label: msg.content.slice(0, 20),
-          timestamp: msg.timestamp,
-          nodeId: agentId,
-        })
+  const timelineEvents = useMemo((): TimelineEvent[] => {
+    const cache = timelineCacheRef.current
+    let appended = false
+    for (const [agentId, msgs] of conversations) {
+      const prevLen = cache.counts.get(agentId) ?? 0
+      if (msgs.length > prevLen) {
+        for (let i = prevLen; i < msgs.length; i++) {
+          const msg = msgs[i]
+          cache.events.push({
+            id: `event-${cache.idCounter++}`,
+            type: msg.type === 'tool_call' ? 'tool_call' : msg.type === 'tool_result' ? 'tool_result' : 'message',
+            label: msg.content.slice(0, 20),
+            timestamp: msg.timestamp,
+            nodeId: agentId,
+          })
+        }
+        cache.counts.set(agentId, msgs.length)
+        appended = true
       }
     }
-
-    return events.sort((a, b) => a.timestamp - b.timestamp)
+    if (appended) cache.events.sort((a, b) => a.timestamp - b.timestamp)
+    return cache.events
   }, [conversations])
 
   // Review mode: when in live mode and user pauses to scrub through history
@@ -218,6 +230,17 @@ export function AgentVisualizer() {
     ]
   ) : []
 
+  const handleCloseSession = useCallback((id: string) => {
+    bridge.removeSession(id)
+    sessionCacheRef.current.delete(id)
+    if (bridge.selectedSessionId === id) {
+      const remaining = bridge.sessions.filter(s => s.id !== id)
+      if (remaining.length > 0) {
+        bridge.selectSession(remaining[remaining.length - 1].id)
+      }
+    }
+  }, [bridge])
+
   const openFile = useCallback((filePath: string, line?: number) => {
     bridge.bridgeOpenFile(filePath, line)
   }, [bridge])
@@ -227,11 +250,7 @@ export function AgentVisualizer() {
     <div className="h-screen w-screen relative overflow-hidden" style={{ background: COLORS.void }}>
       {/* Canvas fills everything */}
       <AgentCanvas
-        agents={agents}
-        toolCalls={toolCalls}
-        particles={particles}
-        edges={edges}
-        discoveries={discoveries}
+        simulationRef={frameRef}
         selectedAgentId={selection.selectedAgentId}
         hoveredAgentId={selection.hoveredAgentId}
         showStats={showStats}
@@ -246,7 +265,6 @@ export function AgentVisualizer() {
         selectedToolCallId={selection.selectedToolCallId}
         onDiscoveryClick={selection.handleDiscoveryClick}
         selectedDiscoveryId={selection.selectedDiscoveryId}
-        currentTime={currentTime}
         showCostOverlay={showCostOverlay}
       />
 
@@ -268,7 +286,7 @@ export function AgentVisualizer() {
         </div>
       )}
 
-      {/* Tool call detail popup (uses snapshot so it persists after card fades) */}
+      {/* Tool call detail popup */}
       {selection.selectedToolData && selection.selectedToolScreenPos && (
         <div {...stopPropagationHandlers}>
           <ToolDetailPopup
@@ -279,7 +297,7 @@ export function AgentVisualizer() {
         </div>
       )}
 
-      {/* Discovery detail popup (uses snapshot so it persists after card fades) */}
+      {/* Discovery detail popup */}
       {selection.selectedDiscoveryData && selection.selectedDiscoveryScreenPos && (
         <div {...stopPropagationHandlers}>
           <DiscoveryDetailPopup
@@ -313,7 +331,10 @@ export function AgentVisualizer() {
         isPlaying={isPlaying}
         speed={speed}
         currentTime={currentTime}
-        totalDuration={bridge.useMockData ? MOCK_DURATION : Math.max(maxTimeReached, currentTime)}
+        totalDuration={bridge.useMockData
+          ? (isReviewing ? Math.max(maxTimeReached, currentTime) : MOCK_DURATION)
+          : Math.max(maxTimeReached, currentTime)
+        }
         onPlayPause={handlePlayPause}
         onRestart={handleRestart}
         onSpeedChange={setSpeed}
@@ -360,20 +381,11 @@ export function AgentVisualizer() {
         sessions={bridge.sessions}
         selectedSessionId={bridge.selectedSessionId}
         sessionsWithActivity={bridge.sessionsWithActivity}
-        onSelectSession={(id) => bridge.selectSession(id)}
-        onCloseSession={(id) => {
-          bridge.removeSession(id)
-          sessionCacheRef.current.delete(id)
-          if (bridge.selectedSessionId === id) {
-            const remaining = bridge.sessions.filter(s => s.id !== id)
-            if (remaining.length > 0) {
-              bridge.selectSession(remaining[remaining.length - 1].id)
-            }
-          }
-        }}
+        onSelectSession={bridge.selectSession}
+        onCloseSession={handleCloseSession}
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
-        agents={agents}
+        agentCount={agents.size}
         totalTokens={totalTokens}
         showFileAttention={showFileAttention}
         showTranscript={showTranscript}

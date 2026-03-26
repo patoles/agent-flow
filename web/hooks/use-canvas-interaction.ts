@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type MutableRefObject } from 'react'
+import { useState, useCallback, useRef, useEffect, type MutableRefObject } from 'react'
 import { Agent, ToolCallNode, Discovery, ANIM } from '@/lib/agent-types'
 import { CAMERA } from '@/lib/canvas-constants'
 import {
@@ -175,7 +175,9 @@ export function useCanvasInteraction({
     dragTargetRef.current = null
   }, [screenToCanvas, findAgentAt, findBubbleAgentAt, findToolCallAt, findDiscoveryAt, drawPropsRef, panVelocityRef])
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  // Wheel handler attached as native event (passive: false) to allow preventDefault
+  const handleWheelRef = useRef<(e: WheelEvent) => void>(() => {})
+  handleWheelRef.current = (e: WheelEvent) => {
     e.preventDefault()
     userHasNavigatedRef.current = true
     if (e.ctrlKey || e.metaKey) {
@@ -191,7 +193,14 @@ export function useCanvasInteraction({
       const prev = transformRef.current
       transformRef.current = { ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }
     }
-  }, [userHasNavigatedRef, mainCanvasRef, transformRef])
+  }
+  useEffect(() => {
+    const canvas = mainCanvasRef.current
+    if (!canvas) return
+    const handler = (e: WheelEvent) => handleWheelRef.current(e)
+    canvas.addEventListener('wheel', handler, { passive: false })
+    return () => canvas.removeEventListener('wheel', handler)
+  }, [mainCanvasRef])
 
   const handleDoubleClick = useCallback(() => {
     doZoomToFit()
@@ -235,7 +244,6 @@ export function useCanvasInteraction({
       onMouseDown: handleMouseDown,
       onMouseMove: handleMouseMove,
       onMouseUp: handleMouseUp,
-      onWheel: handleWheel,
       onDoubleClick: handleDoubleClick,
       onContextMenu: handleContextMenuEvent,
       onMouseLeave: handleMouseLeave,

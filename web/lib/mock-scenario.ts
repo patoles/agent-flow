@@ -1,10 +1,29 @@
 import type { SimulationEvent } from './agent-types'
+import { STRESS_SCENARIOS, type StressLevel } from './stress-test-scenario'
+
+// ─── Stress Test Support ─────────────────────────────────────────────────────
+// Add ?stress=light|medium|heavy|extreme to the URL to load a stress scenario.
+// This replaces the normal mock scenario for profiling purposes.
+
+function getStressLevel(): StressLevel | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const level = params.get('stress')
+  if (level && level in STRESS_SCENARIOS) return level as StressLevel
+  return null
+}
+
+const stressLevel = getStressLevel()
+if (stressLevel) {
+  // eslint-disable-next-line no-console
+  console.log(`[stress-test] Loading ${stressLevel} stress scenario...`)
+}
 
 // ─── Rich Mock Scenario ──────────────────────────────────────────────────────
 // Demonstrates a full agent session: user prompt → research → parallel subagents
 // → implementation → testing with error recovery → completion
 
-export const MOCK_SCENARIO: SimulationEvent[] = [
+const NORMAL_MOCK_SCENARIO: SimulationEvent[] = [
   // ── Agent Spawn & User Prompt ─────────────────────────────────────────────
   { time: 0.0, type: 'agent_spawn', payload: { name: 'orchestrator', isMain: true, task: 'Waiting for instructions...' } },
   { time: 0.2, type: 'message', payload: { agent: 'orchestrator', role: 'user', content: 'Refactor the payment system to support Stripe and PayPal, add webhook handling, and write integration tests' } },
@@ -193,4 +212,10 @@ export const MOCK_SCENARIO: SimulationEvent[] = [
   { time: 65.0, type: 'agent_complete', payload: { name: 'orchestrator' } },
 ]
 
-export const MOCK_DURATION = MOCK_SCENARIO[MOCK_SCENARIO.length - 1].time + 10
+export const MOCK_SCENARIO: SimulationEvent[] = stressLevel
+  ? STRESS_SCENARIOS[stressLevel]()
+  : NORMAL_MOCK_SCENARIO
+
+export const MOCK_DURATION = MOCK_SCENARIO.length > 0
+  ? MOCK_SCENARIO[MOCK_SCENARIO.length - 1].time + 10
+  : 0
