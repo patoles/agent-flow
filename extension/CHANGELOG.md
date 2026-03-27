@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Standalone web app — run Agent Flow in the browser without VS Code (`pnpm run dev`)
+- pnpm workspace monorepo setup
+- VS Code debug and dev configuration
+- Fix: event loss from React strict mode double-invocation
+- Fix: SSE relay security hardening (localhost-only binding, restricted CORS, bounded event buffer)
+
 ## 0.5.0
 
 - Fix: heavy performance degradation during long sessions with many agents (#20)

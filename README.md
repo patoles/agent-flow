@@ -27,15 +27,27 @@ Claude Code is powerful, but its execution is a black box — you see the final 
 
 ## Getting Started
 
+### Standalone Web App (no VS Code required)
+
+Use Agent Flow directly in your browser — works with Claude Code in any terminal.
+
+```bash
+git clone https://github.com/patoles/agent-flow.git
+cd agent-flow
+pnpm i
+pnpm run setup      # configure Claude Code hooks (one-time)
+pnpm run dev        # start the web app + event relay
+```
+
+Open http://localhost:3000 and start a Claude Code session in another terminal — events will stream to the browser in real-time.
+
+### VS Code Extension
+
 1. Install the extension
 2. Open the Command Palette (`Cmd+Shift+P`) and run **Agent Flow: Open Agent Flow**
 3. Start a Claude Code session in your workspace — Agent Flow will auto-detect it
 
-### Claude Code Hooks
-
-Agent Flow automatically configures Claude Code hooks the first time you open the panel. These forward events from Claude Code to Agent Flow for zero-latency streaming.
-
-To manually reconfigure hooks, run **Agent Flow: Configure Claude Code Hooks** from the Command Palette.
+Agent Flow automatically configures Claude Code hooks the first time you open the panel. To manually reconfigure, run **Agent Flow: Configure Claude Code Hooks** from the Command Palette.
 
 ### JSONL Event Log
 
@@ -69,10 +81,10 @@ You can also point Agent Flow at a JSONL event log file:
 
 ## Requirements
 
-- [JDK 26](https://www.oracle.com/tw/java/technologies/downloads/#jdk26-mac) or later
+- [Node.js](https://nodejs.org/) 20+ (LTS recommended)
 - [pnpm](https://pnpm.io/)
-- A VSCode-compatible IDE (e.g. [VS Code](https://code.visualstudio.com/), [Cursor](https://cursor.sh/), [Windsurf](https://windsurf.com/))
-- For auto-detection: Claude Code CLI with active sessions
+- Claude Code CLI
+- For the VS Code extension: a VSCode-compatible IDE 1.85+ (e.g. [VS Code](https://code.visualstudio.com/), [Cursor](https://cursor.sh/), [Windsurf](https://windsurf.com/))
 
 ## Development
 

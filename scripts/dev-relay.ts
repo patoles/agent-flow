@@ -42,9 +42,9 @@ const sseClients = new Set<http.ServerResponse>()
 
 function createSSEServer(port: number) {
   const server = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000')
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', '*')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
@@ -97,7 +97,7 @@ function createSSEServer(port: number) {
     res.end('Agent Flow Dev Relay')
   })
 
-  server.listen(port, '0.0.0.0', () => {
+  server.listen(port, '127.0.0.1', () => {
     console.log(`SSE relay on http://127.0.0.1:${port}/events`)
   })
 
@@ -105,17 +105,22 @@ function createSSEServer(port: number) {
 }
 
 function sendSSE(res: http.ServerResponse, data: unknown) {
-  try { res.write(`data: ${JSON.stringify(data)}\n\n`) } catch {}
+  try { res.write(`data: ${JSON.stringify(data)}\n\n`) } catch (e) {
+    sseClients.delete(res)
+  }
 }
 
 function broadcast(data: string) {
   for (const res of sseClients) {
-    try { res.write(`data: ${data}\n\n`) } catch {}
+    try { res.write(`data: ${data}\n\n`) } catch (e) {
+      sseClients.delete(res)
+    }
   }
 }
 
 // ─── Event buffering & broadcasting ─────────────────────────────────────────
 
+const MAX_EVENT_BUFFER = 5000
 const eventBuffer = new Map<string, AgentEvent[]>()
 
 function broadcastEvent(event: AgentEvent) {
@@ -124,8 +129,11 @@ function broadcastEvent(event: AgentEvent) {
 
   // Buffer events per session for replay on SSE connect
   if (event.sessionId) {
-    const buf = eventBuffer.get(event.sessionId) || []
+    let buf = eventBuffer.get(event.sessionId) || []
     buf.push(event)
+    if (buf.length > MAX_EVENT_BUFFER) {
+      buf = buf.slice(buf.length - MAX_EVENT_BUFFER)
+    }
     eventBuffer.set(event.sessionId, buf)
   }
 

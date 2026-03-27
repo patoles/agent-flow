@@ -39,5 +39,7 @@ export default defineConfig({
   },
   define: {
     'process.env.NODE_ENV': '"production"',
+    'process.env.NEXT_PUBLIC_DEMO': '"1"',
+    'process.env.NEXT_PUBLIC_RELAY_PORT': '"3001"',
   },
 })
