@@ -142,7 +142,7 @@ export class SessionWatcher implements vscode.Disposable {
       if (fs.existsSync(resolvedDir)) {
         this.workspacePath = encoded
       } else {
-        const unresolvedEncoded = workspaceFolder.replace(/[/\\:_]/g, '-')
+        const unresolvedEncoded = workspaceFolder.replace(/[^a-zA-Z0-9]/g, '-')
         const unresolvedDir = path.join(CLAUDE_DIR, unresolvedEncoded)
         this.workspacePath = fs.existsSync(unresolvedDir) ? unresolvedEncoded : encoded
       }
