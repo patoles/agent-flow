@@ -132,7 +132,7 @@ export class SessionWatcher implements vscode.Disposable {
       // Resolve symlinks first, then replace /, \, : (drive letter), and _ with -
       let resolved = workspaceFolder
       try { resolved = fs.realpathSync(resolved) } catch { /* use original if realpathSync fails */ }
-      const encoded = resolved.replace(/[/\\:_]/g, '-')
+      const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
 
       this.resolvedWorkspace = resolved
 
