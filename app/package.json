@@ -1,6 +1,6 @@
 {
   "name": "agent-flow-app",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Real-time visualization of AI agent orchestration — standalone web app",
   "bin": {
     "agent-flow": "dist/app.js"

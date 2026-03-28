@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Fix: session detection for workspace paths containing underscores or other special characters (#18, #19)
+
 ## 0.6.1
 
 - npx support — `npx agent-flow-app` starts the visualizer without cloning the repo

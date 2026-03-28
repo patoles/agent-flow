@@ -2,7 +2,7 @@
   "name": "agent-flow",
   "displayName": "Agent Flow",
   "description": "Real-time visualization of Claude Code agent orchestration",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "publisher": "simon-p",
   "license": "Apache-2.0",
   "repository": {
