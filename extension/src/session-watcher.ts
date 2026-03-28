@@ -128,11 +128,11 @@ export class SessionWatcher implements vscode.Disposable {
     // Scope to the current workspace so we only watch sessions for this project
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     if (workspaceFolder) {
-      // Claude Code encodes project paths: /Users/simon/project → -Users-simon-project
-      // Resolve symlinks first, then replace /, \ (Windows), and : (drive letter) with -
+      // Claude Code encodes project paths: /Users/simon/my_project → -Users-simon-my-project
+      // Resolve symlinks first, then replace /, \, : (drive letter), and _ with -
       let resolved = workspaceFolder
       try { resolved = fs.realpathSync(resolved) } catch { /* use original if realpathSync fails */ }
-      const encoded = resolved.replace(/[/\\:]/g, '-')
+      const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
 
       this.resolvedWorkspace = resolved
 
@@ -142,7 +142,7 @@ export class SessionWatcher implements vscode.Disposable {
       if (fs.existsSync(resolvedDir)) {
         this.workspacePath = encoded
       } else {
-        const unresolvedEncoded = workspaceFolder.replace(/[/\\:]/g, '-')
+        const unresolvedEncoded = workspaceFolder.replace(/[/\\:_]/g, '-')
         const unresolvedDir = path.join(CLAUDE_DIR, unresolvedEncoded)
         this.workspacePath = fs.existsSync(unresolvedDir) ? unresolvedEncoded : encoded
       }
