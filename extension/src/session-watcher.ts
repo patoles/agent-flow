@@ -346,6 +346,34 @@ export class SessionWatcher implements vscode.Disposable {
           scanSubagentsDir(this.selfDelegate, this.parser, af.sessionId)
         }
       }
+
+      // Also scan for recent inactive sessions (updated in last 24h) for visibility
+      // but don't auto-watch them unless they become active again
+      try {
+        const inactiveFiles: { sessionId: string; filePath: string; ageMinutes: number }[] = []
+        for (const projectPath of dirsToScan) {
+          try {
+            const files = fs.readdirSync(projectPath)
+            for (const file of files) {
+              if (!file.endsWith('.jsonl')) continue
+              const filePath = path.join(projectPath, file)
+              const stat = fs.statSync(filePath)
+              const ageSeconds = (Date.now() - stat.mtimeMs) / 1000
+              const ageMinutes = ageSeconds / 60
+              // Recent sessions in last 24h but older than active threshold
+              if (ageSeconds > ACTIVE_SESSION_AGE_S && ageMinutes < 24 * 60) {
+                const sessionId = path.basename(file, '.jsonl')
+                if (!this.sessions.has(sessionId)) {
+                  inactiveFiles.push({ sessionId, filePath, ageMinutes })
+                }
+              }
+            }
+          } catch { /* skip on read error */ }
+        }
+        if (inactiveFiles.length > 0) {
+          log.debug(`Found ${inactiveFiles.length} recent inactive sessions: ${inactiveFiles.map(f => `${f.sessionId.slice(0, 8)}(${f.ageMinutes.toFixed(0)}m)`).join(', ')}`)
+        }
+      } catch { /* silent */ }
     } catch (err) {
       log.error('Scan error:', err)
     }
