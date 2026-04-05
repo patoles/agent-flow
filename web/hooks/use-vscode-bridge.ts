@@ -83,8 +83,109 @@ export function useVSCodeBridge(): BridgeHookResult {
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data)
-        window.postMessage(data, '*')
-      } catch {}
+        // In standalone mode, process SSE messages directly without postMessage
+        // postMessage to self doesn't work reliably in same-origin context
+        if (data.type === 'agent-event' && data.event) {
+          const eventData = data as { type: string; event: AgentEvent }
+          const simEvent: SimulationEvent = {
+            time: eventData.event.time,
+            type: eventData.event.type as SimulationEvent['type'],
+            payload: eventData.event.payload,
+            sessionId: eventData.event.sessionId,
+          }
+
+          let selected = selectedSessionIdRef.current
+
+          // Auto-select session if none is selected and event has sessionId
+          if (!selected && eventData.event.sessionId) {
+            sessionSwitchPendingRef.current = true
+            pendingEventsRef.current.length = 0
+            selectedSessionIdRef.current = eventData.event.sessionId
+            selected = eventData.event.sessionId
+            setSelectedSessionId(eventData.event.sessionId)
+            // Create a session entry if it doesn't exist
+            setSessions(prev => {
+              const exists = prev.find(s => s.id === eventData.event.sessionId)
+              if (exists) return prev
+              return [...prev, {
+                id: eventData.event.sessionId!,
+                label: `Session ${eventData.event.sessionId!.slice(0, 8)}`,
+                status: 'active' as const,
+                startTime: Date.now(),
+                lastActivityTime: Date.now(),
+              }]
+            })
+          }
+
+          if (selected && eventData.event.sessionId === selected && !sessionSwitchPendingRef.current) {
+            pendingEventsRef.current.push(simEvent)
+            setEventVersion(v => v + 1)
+          } else if (eventData.event.sessionId && eventData.event.sessionId !== selected) {
+            setSessionsWithActivity(prev => {
+              if (prev.has(eventData.event.sessionId!)) return prev
+              const next = new Set(prev)
+              next.add(eventData.event.sessionId!)
+              return next
+            })
+          }
+
+          // Buffer by session for replay
+          if (eventData.event.sessionId) {
+            const buf = sessionEventsRef.current.get(eventData.event.sessionId) || []
+            buf.push(simEvent)
+            sessionEventsRef.current.set(eventData.event.sessionId, buf)
+          }
+        } else if (data.type === 'session-list' && data.sessions) {
+          setSessions(data.sessions)
+          if (!selectedSessionIdRef.current && data.sessions.length > 0) {
+            const sorted = [...data.sessions].sort((a, b) => {
+              const aActive = a.status === 'active' ? 1 : 0
+              const bActive = b.status === 'active' ? 1 : 0
+              if (aActive !== bActive) return bActive - aActive
+              return b.lastActivityTime - a.lastActivityTime
+            })
+            sessionSwitchPendingRef.current = true
+            pendingEventsRef.current.length = 0
+            selectedSessionIdRef.current = sorted[0].id
+            setSelectedSessionId(sorted[0].id)
+          }
+        } else if (data.type === 'session-started' && data.session) {
+          setSessions(prev => {
+            const existing = prev.find(s => s.id === data.session.id)
+            if (existing) return prev.map(s => s.id === data.session.id ? { ...s, status: 'active' as const, lastActivityTime: Date.now() } : s)
+            return [...prev, data.session]
+          })
+          sessionSwitchPendingRef.current = true
+          pendingEventsRef.current.length = 0
+          selectedSessionIdRef.current = data.session.id
+          setSelectedSessionId(data.session.id)
+        } else if (data.type === 'session-ended') {
+          setSessions(prev => prev.map(s => s.id === data.sessionId ? { ...s, status: 'completed' as const } : s))
+        } else if (data.type === 'session-updated') {
+          setSessions(prev => prev.map(s => s.id === data.sessionId ? { ...s, label: data.label } : s))
+        } else if (data.type === 'agent-event-batch') {
+          for (const event of data.events) {
+            const simEvent: SimulationEvent = {
+              time: event.time,
+              type: event.type as SimulationEvent['type'],
+              payload: event.payload,
+              sessionId: event.sessionId,
+            }
+            const selected = selectedSessionIdRef.current
+            if (selected && event.sessionId === selected && !sessionSwitchPendingRef.current) {
+              pendingEventsRef.current.push(simEvent)
+            }
+            if (event.sessionId) {
+              const buf = sessionEventsRef.current.get(event.sessionId) || []
+              buf.push(simEvent)
+              sessionEventsRef.current.set(event.sessionId, buf)
+            }
+          }
+          setEventVersion(v => v + 1)
+        }
+      } catch (err) {
+        console.error('Error processing SSE message:', err)
+      }
     }
     es.onerror = () => {
       setConnectionStatus('disconnected')
