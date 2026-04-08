@@ -241,7 +241,7 @@ function scanForActiveSessions(workspace: string) {
 
   let resolved = workspace
   try { resolved = fs.realpathSync(resolved) } catch {}
-  const encoded = resolved.replace(/[/\\:]/g, '-')
+  const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
 
   const dirsToScan: string[] = []
   const projectDir = path.join(CLAUDE_DIR, encoded)
@@ -353,7 +353,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   const scanInterval = setInterval(() => scanForActiveSessions(workspace), SCAN_INTERVAL_MS)
 
   const resolved = (() => { try { return fs.realpathSync(workspace) } catch { return workspace } })()
-  const encoded = resolved.replace(/[/\\:]/g, '-')
+  const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
   const projectDir = path.join(CLAUDE_DIR, encoded)
   let projectDirWatcher: fs.FSWatcher | null = null
   if (fs.existsSync(projectDir)) {
