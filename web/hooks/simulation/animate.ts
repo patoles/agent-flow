@@ -83,6 +83,7 @@ function cleanupFaded(
   edges: SimulationState['edges'],
   originalAgents: SimulationState['agents'],
   originalToolCalls: SimulationState['toolCalls'],
+  serviceNodes?: SimulationState['serviceNodes'],
 ): { agents: SimulationState['agents']; toolCalls: SimulationState['toolCalls']; edges: SimulationState['edges'] } {
   let newAgents = agents
   let newToolCalls = toolCalls
@@ -119,10 +120,46 @@ function cleanupFaded(
   filteredEdges = filteredEdges.filter(e => {
     const fromExists = newAgents.has(e.from)
     if (!fromExists) return false
-    const toExists = newAgents.has(e.to) || newToolCalls.has(e.to)
+    const toExists = newAgents.has(e.to) || newToolCalls.has(e.to) || (serviceNodes?.has(e.to) ?? false)
     return toExists
   })
   return { agents: newAgents, toolCalls: newToolCalls, edges: filteredEdges }
+}
+
+/** Seconds of inactivity before a service node starts fading out */
+const SERVICE_IDLE_TIMEOUT_S = 60
+
+function animateServiceNodes(serviceNodes: SimulationState['serviceNodes'], deltaTime: number, currentTime: number): SimulationState['serviceNodes'] {
+  let newNodes = serviceNodes
+  for (const [id, svc] of serviceNodes) {
+    let updated = false
+    let opacity = svc.opacity
+    let scale = svc.scale
+    const idleTime = currentTime - svc.lastActiveTime
+    const shouldFadeOut = svc.activeCalls === 0 && idleTime > SERVICE_IDLE_TIMEOUT_S
+
+    if (shouldFadeOut) {
+      // Fade out after idle timeout
+      if (opacity > 0) { opacity = Math.max(0, opacity - deltaTime * ANIM_SPEED.agentFadeOut); updated = true }
+    } else {
+      // Fade in
+      if (opacity < 1) { opacity = Math.min(1, opacity + deltaTime * ANIM_SPEED.agentFadeIn); updated = true }
+      if (scale < 1) { scale = Math.min(1, scale + deltaTime * ANIM_SPEED.agentScaleIn); updated = true }
+    }
+
+    if (updated) {
+      if (newNodes === serviceNodes) newNodes = new Map(serviceNodes)
+      newNodes.set(id, { ...svc, opacity, scale })
+    }
+  }
+  // Cleanup fully faded service nodes
+  for (const [id, svc] of newNodes) {
+    if (svc.opacity <= 0) {
+      if (newNodes === serviceNodes) newNodes = new Map(serviceNodes)
+      newNodes.delete(id)
+    }
+  }
+  return newNodes
 }
 
 function animateDiscoveries(discoveries: SimulationState['discoveries'], deltaTime: number, newTime: number): SimulationState['discoveries'] {
@@ -158,10 +195,10 @@ export function computeNextFrame(prev: SimulationState, deltaTime: number, newTi
       const newAgentsRaw = animateAgents(currentState.agents, deltaTime, currentState.currentTime)
       const newEdgesRaw = animateEdges(currentState.edges, deltaTime)
       const newToolCallsRaw = animateToolCalls(currentState.toolCalls, deltaTime, newTime)
+      const newServiceNodes = animateServiceNodes(currentState.serviceNodes, deltaTime, newTime)
 
       const { agents: newAgents, toolCalls: newToolCalls, edges: filteredEdges } =
-        cleanupFaded(newAgentsRaw, newToolCallsRaw, newEdgesRaw, currentState.agents, currentState.toolCalls)
-
+        cleanupFaded(newAgentsRaw, newToolCallsRaw, newEdgesRaw, currentState.agents, currentState.toolCalls, newServiceNodes)
       const newDiscoveries = animateDiscoveries(currentState.discoveries, deltaTime, newTime)
       const newParticles = animateParticles(currentState.particles, deltaTime, currentState.speed)
 
@@ -169,7 +206,7 @@ export function computeNextFrame(prev: SimulationState, deltaTime: number, newTi
       if (options.useMockData && currentState.eventIndex >= options.mockScenarioLength && newTime > options.mockScenarioEndTime + MOCK_END_BUFFER_S) {
         return {
           ...currentState, currentTime: newTime, eventIndex: currentState.eventIndex,
-          agents: newAgents, toolCalls: newToolCalls,
+          agents: newAgents, toolCalls: newToolCalls, serviceNodes: newServiceNodes,
           particles: newParticles, edges: filteredEdges,
           discoveries: newDiscoveries,
           maxTimeReached: maxT,
@@ -179,7 +216,7 @@ export function computeNextFrame(prev: SimulationState, deltaTime: number, newTi
 
       return {
         ...currentState, currentTime: newTime, eventIndex: currentState.eventIndex,
-        agents: newAgents, toolCalls: newToolCalls,
+        agents: newAgents, toolCalls: newToolCalls, serviceNodes: newServiceNodes,
         particles: newParticles, edges: filteredEdges,
         discoveries: newDiscoveries,
         maxTimeReached: maxT,

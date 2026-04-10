@@ -5,7 +5,7 @@ import {
   ORCHESTRATOR_NAME, PREVIEW_MAX, RESULT_MAX,
   SESSION_ID_DISPLAY, FAILED_RESULT_MAX, HOOK_MAX_BODY_SIZE,
   SUBAGENT_ID_SUFFIX_LENGTH, HOOK_SERVER_HOST, HOOK_SERVER_NOT_STARTED,
-  generateSubagentFallbackName,
+  generateSubagentFallbackName, resolveSubagentChildName,
 } from './constants'
 import { summarizeInput, summarizeResult, extractFilePath, buildDiscovery } from './tool-summarizer'
 import { estimateTokenCost } from './token-estimator'
@@ -259,14 +259,51 @@ export class HookServer implements vscode.Disposable {
     const agentType = payload.agent_type || 'subagent'
     const agentId = payload.agent_id || ''
     const sessionAgents = this.getOrCreateSession(payload.session_id).agentNames
-    const childName = agentId ? `${agentType}-${agentId.slice(-SUBAGENT_ID_SUFFIX_LENGTH)}` : generateSubagentFallbackName(String(Date.now()), sessionAgents.size + 1)
 
-    sessionAgents.set(agentId, childName)
+    const self = this
+    const tryReadMeta = (): string | null => {
+      try {
+        if (agentId && payload.session_id && payload.cwd) {
+          const fs = require('fs')
+          const path = require('path')
+          const os = require('os')
+          const resolvedCwd = fs.realpathSync(payload.cwd)
+          const encoded = resolvedCwd.replace(/[/\\:.]/g, '-')
+          const metaPath = path.join(
+            os.homedir(), '.claude', 'projects', encoded,
+            payload.session_id, 'subagents', `agent-${agentId}.meta.json`,
+          )
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+          const name = resolveSubagentChildName(meta)
+          if (name && name !== 'subagent') return name
+        }
+      } catch { /* meta.json may not exist yet */ }
+      return null
+    }
 
-    emitSubagentSpawn(
-      { emit: (e, s) => this.emit(e, s), elapsed: (s) => this.elapsedSeconds(s) },
-      parentName, childName, agentType, payload.session_id,
-    )
+    const doSpawn = (childName: string) => {
+      sessionAgents.set(agentId, childName)
+      emitSubagentSpawn(
+        { emit: (e, s) => self.emit(e, s), elapsed: (s) => self.elapsedSeconds(s) },
+        parentName, childName, agentType, payload.session_id, agentType,
+      )
+    }
+
+    // Try immediately — meta.json may already exist
+    const immediate = tryReadMeta()
+    if (immediate) {
+      doSpawn(immediate)
+      return
+    }
+
+    // Retry after 250ms — Claude Code writes meta.json shortly after SubagentStart
+    setTimeout(() => {
+      const name = tryReadMeta()
+        || (agentId
+          ? `${agentType}-${agentId.slice(-SUBAGENT_ID_SUFFIX_LENGTH)}`
+          : generateSubagentFallbackName(String(Date.now()), sessionAgents.size + 1))
+      doSpawn(name)
+    }, 250)
   }
 
   private handleSubagentStop(payload: HookPayload): void {

@@ -1,7 +1,31 @@
 import { COLORS } from '@/lib/colors'
-import { TOOL_DEDUP_WINDOW_S } from '@/lib/canvas-constants'
+import { type ServiceNode } from '@/lib/agent-types'
+import { TOOL_DEDUP_WINDOW_S, SERVICE_NODE } from '@/lib/canvas-constants'
 import { pushTimelineBlock, type ProcessEventContext, type MutableEventState } from './process-event'
-import { appendConversation, asString, asBoolean, LABEL_LEN_PARTICLE, LABEL_LEN_TIMELINE } from './types'
+import { appendConversation, edgeId, asString, asBoolean, LABEL_LEN_PARTICLE, LABEL_LEN_TIMELINE } from './types'
+
+/** Well-known MCP server display names */
+const MCP_DISPLAY_NAMES: Record<string, string> = {
+  'azure-devops': 'Azure DevOps',
+  'azure': 'Azure',
+  'github': 'GitHub',
+  'google-workspace': 'Google Workspace',
+  'context7': 'Context7',
+  'claude_ai_Gmail': 'Gmail',
+  'claude_ai_Slack': 'Slack',
+  'mercadopago': 'Mercado Pago',
+}
+
+/** Parse MCP tool name to extract server. Returns null for non-MCP tools. */
+function parseMcpServer(toolName: string): { server: string; displayName: string } | null {
+  if (!toolName.startsWith('mcp__')) return null
+  const parts = toolName.split('__')
+  if (parts.length < 3) return null
+  const server = parts[1]
+  const displayName = MCP_DISPLAY_NAMES[server]
+    || server.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+  return { server, displayName }
+}
 
 /** Extract file path from tool input data or fall back to first token of args */
 function extractFilePath(inputData?: Record<string, unknown>, args?: string): string {
@@ -64,6 +88,63 @@ export function handleToolCallStart(
       size: 4, trailLength: 0.15,
       label: `${toolName} ${args}`.slice(0, LABEL_LEN_PARTICLE),
     })
+
+    // MCP service node: create/update when tool is an MCP call
+    const mcpInfo = parseMcpServer(toolName)
+    if (mcpInfo) {
+      const serviceId = `service-${mcpInfo.server}`
+      const existing = state.serviceNodes.get(serviceId)
+      if (existing) {
+        const connectedAgents = existing.connectedAgents.includes(agentName)
+          ? existing.connectedAgents
+          : [...existing.connectedAgents, agentName]
+        state.serviceNodes.set(serviceId, {
+          ...existing,
+          totalCalls: existing.totalCalls + 1,
+          activeCalls: existing.activeCalls + 1,
+          lastActiveTime: currentTime,
+          connectedAgents,
+        })
+      } else {
+        // Spawn service node offset from the agent
+        const angle = Math.PI / 2 + Math.random() * Math.PI  // bottom-ish hemisphere
+        const svc: ServiceNode = {
+          id: serviceId,
+          name: mcpInfo.server,
+          displayName: mcpInfo.displayName,
+          x: agent.x + Math.cos(angle) * SERVICE_NODE.spawnDistance,
+          y: agent.y + Math.sin(angle) * SERVICE_NODE.spawnDistance,
+          vx: 0, vy: 0,
+          totalCalls: 1,
+          activeCalls: 1,
+          lastActiveTime: currentTime,
+          opacity: 0,
+          scale: 0.3,
+          connectedAgents: [agentName],
+        }
+        state.serviceNodes.set(serviceId, svc)
+      }
+
+      // Ensure edge from agent → service exists
+      const svcEdgeId = edgeId(agentName, serviceId)
+      if (!state.edges.some(e => e.id === svcEdgeId)) {
+        state.edges.push({ id: svcEdgeId, from: agentName, to: serviceId, type: 'service', opacity: 0 })
+      }
+
+      // Particle along agent → service edge
+      state.particles.push({
+        id: `p-svc-${currentTime}-${toolId}`,
+        edgeId: edgeId(agentName, serviceId), progress: 0,
+        type: 'tool_call', color: COLORS.service,
+        size: 5, trailLength: 0.2,
+        label: mcpInfo.displayName,
+      })
+
+      // Sync force after adding service node
+      if (!ctx.skipForceSync) {
+        setTimeout(() => ctx.syncForceSimulation(state.agents, state.edges), 0)
+      }
+    }
 
     // Timeline block
     const entry = state.timelineEntries.get(agentName)
@@ -135,6 +216,30 @@ export function handleToolCallEnd(
         })
         break
       }
+    }
+
+    // MCP service node: decrement active calls
+    const mcpInfoEnd = parseMcpServer(toolName)
+    if (mcpInfoEnd) {
+      const serviceId = `service-${mcpInfoEnd.server}`
+      const svc = state.serviceNodes.get(serviceId)
+      if (svc) {
+        state.serviceNodes.set(serviceId, {
+          ...svc,
+          activeCalls: Math.max(0, svc.activeCalls - 1),
+          lastActiveTime: currentTime,
+        })
+      }
+
+      // Return particle along service → agent edge
+      const svcEdgeId = edgeId(agentName, serviceId)
+      state.particles.push({
+        id: `p-svcr-${currentTime}-${toolName}`,
+        edgeId: svcEdgeId, progress: 1,
+        type: 'tool_return', color: COLORS.service,
+        size: 5, trailLength: 0.2,
+        label: result.slice(0, LABEL_LEN_PARTICLE),
+      })
     }
 
     // Timeline block end

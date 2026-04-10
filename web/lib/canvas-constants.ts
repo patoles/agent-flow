@@ -163,7 +163,33 @@ export const COST_RATE = 6
 
 // ─── Agent drawing constants ────────────────────────────────────────────────
 
-export const AGENT_DRAW = {
+export const AGENT_DRAW: {
+  readonly bubbleAnchorOffset: number
+  readonly bubbleCursorY: number
+  readonly glowPadding: number
+  readonly outerRingOffset: number
+  readonly shadowBlur: number
+  readonly shadowOffsetX: number
+  readonly shadowOffsetY: number
+  readonly labelYOffset: number
+  readonly labelWidthMultiplier: number
+  readonly scanlineHalfH: number
+  readonly scanlineWidth: number
+  readonly waitingDashSpeed: number
+  readonly orbitParticleOffset: number
+  readonly orbitParticleSize: number
+  readonly rippleInnerOffset: number
+  readonly rippleMaxExpand: number
+  readonly rippleMaxAlpha: number
+  readonly waitingOrbitOffset: number
+  readonly waitingOrbitParticleSize: number
+  readonly waitingOrbitSpeed: number
+  readonly waitingBreatheSpeed: number
+  readonly waitingBreatheAmp: number
+  readonly sparkScale: number
+  readonly sparkViewBox: number
+  readonly subIconScale: number
+} = {
   /** Offset from agent center to bubble anchor point */
   bubbleAnchorOffset: 14,
   /** Initial cursor Y offset for bubbles */
@@ -178,8 +204,18 @@ export const AGENT_DRAW = {
   shadowOffsetY: 5,
   /** Agent name label Y offset from agent radius */
   labelYOffset: 8,
-  /** Agent name label width multiplier of radius */
-  labelWidthMultiplier: 3,
+  /** Agent name label width multiplier of radius — configurable via ?labelSize query param */
+  labelWidthMultiplier: (() => {
+    if (typeof window === 'undefined') return 3
+    const p = new URLSearchParams(window.location.search)
+    const size = p.get('labelSize')
+    switch (size) {
+      case 'compact': return 2
+      case 'wide': return 5
+      case 'full': return 8
+      default: return 3.5  // 'normal' or unset — slightly wider than original
+    }
+  })(),
   /** Scanline gradient half-height */
   scanlineHalfH: 4,
   /** Scanline width = 2 * scanlineHalfH */
@@ -206,7 +242,7 @@ export const AGENT_DRAW = {
   sparkViewBox: 256,
   /** Sub-agent icon font size relative to radius */
   subIconScale: 0.45,
-} as const
+}
 
 export const CONTEXT_BAR = {
   /** Minimum bar width */
@@ -215,7 +251,7 @@ export const CONTEXT_BAR = {
   widthMultiplier: 2.2,
   barHeight: 6,
   /** Y offset from agent radius */
-  yOffset: 22,
+  yOffset: 36,
   borderRadius: 3,
   /** Font for token count label */
   fontSize: 7,
@@ -248,6 +284,29 @@ export const STATS_OVERLAY = {
   borderRadius: 3,
   fontSize: 8,
   textPaddingY: 4,
+} as const
+
+// ─── Service node drawing constants ─────────────────────────────────────────
+
+export const SERVICE_NODE = {
+  /** Radius of the hexagonal service node */
+  radius: 22,
+  /** Glow padding */
+  glowPadding: 12,
+  /** Label Y offset below the hex */
+  labelYOffset: 8,
+  /** Label width multiplier */
+  labelWidthMultiplier: 4,
+  /** Stats font size */
+  statsFontSize: 7,
+  /** Stats Y offset below label */
+  statsYOffset: 12,
+  /** Icon font size (emoji) */
+  iconFontSize: 14,
+  /** Pulse speed for active service */
+  pulseSpeed: 2,
+  /** Spawn distance from connected agents */
+  spawnDistance: 300,
 } as const
 
 // ─── Tool card drawing constants ────────────────────────────────────────────

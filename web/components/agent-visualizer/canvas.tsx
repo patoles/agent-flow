@@ -16,6 +16,7 @@ import {
   drawEdges, getActiveEdgeIds,
   drawParticles, buildEdgeMap,
   drawToolCalls,
+  drawServiceNodes,
   drawDiscoveries, drawDiscoveryConnections,
   drawCostLabels, drawCostSummaryPanel,
   detectStateChanges as detectStateChangesPure,
@@ -90,7 +91,7 @@ export function AgentCanvas({
   // at the top of each draw frame, so it's always fresh even without re-renders.
   const sim = simulationRef.current
   const makeDrawProps = (prev?: { isDragging: boolean }) => ({
-    agents: sim.agents, toolCalls: sim.toolCalls,
+    agents: sim.agents, toolCalls: sim.toolCalls, serviceNodes: sim.serviceNodes,
     particles: sim.particles, edges: sim.edges, discoveries: sim.discoveries,
     selectedAgentId, hoveredAgentId, showStats, showHexGrid,
     showCostOverlay, selectedToolCallId, selectedDiscoveryId,
@@ -182,6 +183,7 @@ export function AgentCanvas({
         const p = drawPropsRef.current
         p.agents = s.agents
         p.toolCalls = s.toolCalls
+        p.serviceNodes = s.serviceNodes
         p.particles = s.particles
         p.edges = s.edges
         p.discoveries = s.discoveries
@@ -189,7 +191,7 @@ export function AgentCanvas({
       }
 
       const {
-        agents, toolCalls, particles, edges, discoveries,
+        agents, toolCalls, serviceNodes, particles, edges, discoveries,
         selectedAgentId, hoveredAgentId, showStats, showHexGrid,
         showCostOverlay, selectedToolCallId, selectedDiscoveryId,
         simTime, pauseAutoFit, dimensions, onAgentDrag,
@@ -266,13 +268,14 @@ export function AgentCanvas({
       }
 
       drawDiscoveryConnections(ctx, discoveries, agents)
-      drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
+      drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current, serviceNodes)
+      drawServiceNodes(ctx, serviceNodes, timeRef.current)
       drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
       drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
       drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current)
       drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
       if (showCostOverlay) drawCostLabels(ctx, agents, toolCalls)
-      drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
+      drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current, serviceNodes)
       drawEffects(ctx, effectsRef.current)
 
       if (selectedAgentId) {

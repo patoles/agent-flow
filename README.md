@@ -97,6 +97,24 @@ You can also point Agent Flow at a JSONL event log file:
 - Claude Code CLI
 - For the VS Code extension: a VSCode-compatible IDE 1.85+ (e.g. [VS Code](https://code.visualstudio.com/), [Cursor](https://cursor.sh/), [Windsurf](https://windsurf.com/))
 
+## Query Parameters
+
+### Label Size
+
+Control agent name label width with the `labelSize` query parameter:
+
+- `?labelSize=compact` — Short labels (multiplier: 2x)
+- `?labelSize=normal` — Default (multiplier: 3.5x)  
+- `?labelSize=wide` — Wider labels (multiplier: 5x)
+- `?labelSize=full` — Full width labels (multiplier: 8x)
+
+Example: `http://127.0.0.1:4321?labelSize=wide`
+
+### Debug Overlays
+
+- `?perf` — Show performance overlay (FPS, frame times)
+- `?stress` — Enable stress test mode with performance overlay
+
 ## Development
 
 ```bash

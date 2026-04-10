@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   Agent,
+  ServiceNode,
   ToolCallNode,
   Edge,
   SimulationEvent,
@@ -63,6 +64,7 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
         // Force tick only updates positions — write to frameRef, no React render
         const prev = frameRef.current
         const newAgents = new Map(prev.agents)
+        let newServiceNodes = prev.serviceNodes
         let changed = false
         for (const node of sim.nodes()) {
           const agent = newAgents.get(node.id)
@@ -72,9 +74,18 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
               changed = true
             }
           }
+          // Also update service node positions from force simulation
+          const svc = newServiceNodes.get(node.id)
+          if (svc && node.x !== undefined && node.y !== undefined) {
+            if (Math.abs(svc.x - node.x) > 0.1 || Math.abs(svc.y - node.y) > 0.1) {
+              if (newServiceNodes === prev.serviceNodes) newServiceNodes = new Map(prev.serviceNodes)
+              newServiceNodes.set(node.id, { ...svc, x: node.x, y: node.y })
+              changed = true
+            }
+          }
         }
         if (changed) {
-          frameRef.current = { ...prev, agents: newAgents }
+          frameRef.current = { ...prev, agents: newAgents, serviceNodes: newServiceNodes }
         }
       })
 
@@ -96,8 +107,18 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
       fy: a.pinned ? a.y : undefined,
     }))
 
+    // Add service nodes to the force simulation
+    const serviceNodes = frameRef.current.serviceNodes
+    for (const svc of serviceNodes.values()) {
+      nodes.push({
+        id: svc.id,
+        x: svc.x, y: svc.y,
+        vx: svc.vx, vy: svc.vy,
+      })
+    }
+
     const links: ForceLink[] = edges
-      .filter(e => e.type === 'parent-child')
+      .filter(e => e.type === 'parent-child' || e.type === 'service')
       .map(e => ({ id: e.id, source: e.from, target: e.to }))
 
     sim.nodes(nodes)

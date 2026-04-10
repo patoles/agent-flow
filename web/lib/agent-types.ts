@@ -30,6 +30,7 @@ export interface Agent {
   isMain: boolean
   currentTool?: string
   task?: string
+  agentType?: string
   spawnTime: number
   completeTime?: number
   opacity: number
@@ -49,6 +50,23 @@ export interface MessageBubble {
   /** Cached word-wrapped lines (avoids re-wrapping every frame) */
   _cachedWrappedLines?: string[]
   _cachedWrappedFont?: string
+}
+
+// MCP service node — persistent external service connection
+export interface ServiceNode {
+  id: string           // "service-azure-devops"
+  name: string         // "azure-devops"
+  displayName: string  // "Azure DevOps"
+  x: number
+  y: number
+  vx: number
+  vy: number
+  totalCalls: number
+  activeCalls: number
+  lastActiveTime: number
+  opacity: number
+  scale: number
+  connectedAgents: string[]
 }
 
 // Rich tool call with actual content
@@ -126,7 +144,7 @@ export interface Edge {
   id: string
   from: string
   to: string
-  type: 'parent-child' | 'tool'
+  type: 'parent-child' | 'tool' | 'service'
   opacity: number
 }
 

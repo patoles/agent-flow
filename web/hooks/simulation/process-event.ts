@@ -1,6 +1,7 @@
 import {
   Agent,
   ToolCallNode,
+  ServiceNode,
   Edge,
   SimulationEvent,
   type TimelineEntry,
@@ -24,6 +25,7 @@ export interface ProcessEventContext {
 export interface MutableEventState {
   agents: Map<string, Agent>
   toolCalls: Map<string, ToolCallNode>
+  serviceNodes: Map<string, ServiceNode>
   particles: SimulationState['particles']
   edges: Edge[]
   discoveries: SimulationState['discoveries']
@@ -62,6 +64,7 @@ export function processEvent(event: SimulationEvent, prev: SimulationState, ctx:
       const state: MutableEventState = {
         agents: new Map(prev.agents),
         toolCalls: new Map(prev.toolCalls),
+        serviceNodes: new Map(prev.serviceNodes),
         particles: [...prev.particles],
         edges: [...prev.edges],
         discoveries: [...prev.discoveries],
@@ -88,7 +91,7 @@ export function processEvent(event: SimulationEvent, prev: SimulationState, ctx:
       // downstream React useMemo/re-render cascades (O(n log n) sorts etc.)
       return {
         ...prev,
-        agents: state.agents, toolCalls: state.toolCalls,
+        agents: state.agents, toolCalls: state.toolCalls, serviceNodes: state.serviceNodes,
         particles: state.particles, edges: state.edges,
         discoveries: state.discoveries,
         fileAttention: mapsEqual(prev.fileAttention, state.fileAttention) ? prev.fileAttention : state.fileAttention,

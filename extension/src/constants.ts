@@ -186,7 +186,7 @@ export function generateSubagentFallbackName(id: string, index: number): string 
 /** Extract a child agent name from a tool_use input block (Agent or Task tool).
  *  Used by both live processing and prescan to avoid duplicating the extraction logic. */
 export function resolveSubagentChildName(input: Record<string, unknown>): string {
-  return String(input.description || input.subagent_type || 'subagent').slice(0, CHILD_NAME_MAX)
+  return String(input.description || input.subagent_type || input.agentType || 'subagent').slice(0, CHILD_NAME_MAX)
 }
 
 /** Prefixes that identify system-injected content (not real user messages) */
