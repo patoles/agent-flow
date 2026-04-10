@@ -126,20 +126,37 @@ function cleanupFaded(
   return { agents: newAgents, toolCalls: newToolCalls, edges: filteredEdges }
 }
 
-function animateServiceNodes(serviceNodes: SimulationState['serviceNodes'], deltaTime: number): SimulationState['serviceNodes'] {
+/** Seconds of inactivity before a service node starts fading out */
+const SERVICE_IDLE_TIMEOUT_S = 60
+
+function animateServiceNodes(serviceNodes: SimulationState['serviceNodes'], deltaTime: number, currentTime: number): SimulationState['serviceNodes'] {
   let newNodes = serviceNodes
   for (const [id, svc] of serviceNodes) {
     let updated = false
     let opacity = svc.opacity
     let scale = svc.scale
+    const idleTime = currentTime - svc.lastActiveTime
+    const shouldFadeOut = svc.activeCalls === 0 && idleTime > SERVICE_IDLE_TIMEOUT_S
 
-    // Fade in
-    if (opacity < 1) { opacity = Math.min(1, opacity + deltaTime * ANIM_SPEED.agentFadeIn); updated = true }
-    if (scale < 1) { scale = Math.min(1, scale + deltaTime * ANIM_SPEED.agentScaleIn); updated = true }
+    if (shouldFadeOut) {
+      // Fade out after idle timeout
+      if (opacity > 0) { opacity = Math.max(0, opacity - deltaTime * ANIM_SPEED.agentFadeOut); updated = true }
+    } else {
+      // Fade in
+      if (opacity < 1) { opacity = Math.min(1, opacity + deltaTime * ANIM_SPEED.agentFadeIn); updated = true }
+      if (scale < 1) { scale = Math.min(1, scale + deltaTime * ANIM_SPEED.agentScaleIn); updated = true }
+    }
 
     if (updated) {
       if (newNodes === serviceNodes) newNodes = new Map(serviceNodes)
       newNodes.set(id, { ...svc, opacity, scale })
+    }
+  }
+  // Cleanup fully faded service nodes
+  for (const [id, svc] of newNodes) {
+    if (svc.opacity <= 0) {
+      if (newNodes === serviceNodes) newNodes = new Map(serviceNodes)
+      newNodes.delete(id)
     }
   }
   return newNodes
@@ -178,7 +195,7 @@ export function computeNextFrame(prev: SimulationState, deltaTime: number, newTi
       const newAgentsRaw = animateAgents(currentState.agents, deltaTime, currentState.currentTime)
       const newEdgesRaw = animateEdges(currentState.edges, deltaTime)
       const newToolCallsRaw = animateToolCalls(currentState.toolCalls, deltaTime, newTime)
-      const newServiceNodes = animateServiceNodes(currentState.serviceNodes, deltaTime)
+      const newServiceNodes = animateServiceNodes(currentState.serviceNodes, deltaTime, newTime)
 
       const { agents: newAgents, toolCalls: newToolCalls, edges: filteredEdges } =
         cleanupFaded(newAgentsRaw, newToolCallsRaw, newEdgesRaw, currentState.agents, currentState.toolCalls, newServiceNodes)
