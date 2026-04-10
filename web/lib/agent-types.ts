@@ -30,6 +30,7 @@ export interface Agent {
   isMain: boolean
   currentTool?: string
   task?: string
+  agentType?: string
   spawnTime: number
   completeTime?: number
   opacity: number

@@ -285,7 +285,7 @@ export class HookServer implements vscode.Disposable {
       sessionAgents.set(agentId, childName)
       emitSubagentSpawn(
         { emit: (e, s) => self.emit(e, s), elapsed: (s) => self.elapsedSeconds(s) },
-        parentName, childName, agentType, payload.session_id,
+        parentName, childName, agentType, payload.session_id, agentType,
       )
     }
 

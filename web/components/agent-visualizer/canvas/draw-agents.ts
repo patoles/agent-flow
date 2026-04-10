@@ -277,13 +277,25 @@ function drawWaitingRipples(ctx: CanvasRenderingContext2D, agent: Agent, r: numb
 }
 
 function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, r: number, isHovered: boolean) {
-  ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
-  ctx.font = '10px monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
   const maxLabelW = r * AGENT_DRAW.labelWidthMultiplier
-  const agentLabel = truncateText(ctx, agent.name, maxLabelW)
-  ctx.fillText(agentLabel, agent.x, agent.y + r + AGENT_DRAW.labelYOffset)
+  let labelY = agent.y + r + AGENT_DRAW.labelYOffset
+
+  // Line 1: agent type (for subagents) or agent name (for orchestrator) — bold, bright
+  const primaryLabel = agent.agentType || agent.name
+  ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textPrimary
+  ctx.font = 'bold 10px monospace'
+  ctx.fillText(truncateText(ctx, primaryLabel, maxLabelW), agent.x, labelY)
+  labelY += 13
+
+  // Line 2: description (for subagents) or task/user message (for orchestrator) — dim
+  const secondaryLabel = agent.agentType ? agent.name : agent.task
+  if (secondaryLabel) {
+    ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
+    ctx.font = '10px monospace'
+    ctx.fillText(truncateText(ctx, secondaryLabel, maxLabelW), agent.x, labelY)
+  }
 }
 
 function drawStatsOverlay(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {

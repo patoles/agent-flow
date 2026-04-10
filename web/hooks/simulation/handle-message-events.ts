@@ -18,12 +18,12 @@ export function handleMessage(
     role === 'thinking' ? 'thinking' :
     'assistant'
 
-  // Rename main agent to the first user message (more recognizable than "orchestrator")
+  // Set the first user message as the orchestrator's task (shown as secondary label)
   if (role === 'user') {
     const msgAgentForName = state.agents.get(agentName)
     if (msgAgentForName && msgAgentForName.isMain && msgAgentForName.name === agentName) {
-      const shortName = content.slice(0, LABEL_LEN_NAME).replace(/\n/g, ' ').trim()
-      state.agents.set(agentName, { ...msgAgentForName, name: shortName || agentName, task: content.slice(0, LABEL_LEN_TASK) })
+      const shortTask = content.slice(0, LABEL_LEN_NAME).replace(/\n/g, ' ').trim()
+      state.agents.set(agentName, { ...msgAgentForName, task: shortTask || agentName })
     }
   }
 

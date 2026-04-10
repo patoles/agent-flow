@@ -256,12 +256,13 @@ export class TranscriptParser {
     // Check if this is a subagent call (Task in older Claude Code, Agent in newer versions)
     if (toolName === 'Task' || toolName === 'Agent') {
       const childName = resolveSubagentChildName(block.input)
+      const agentType = String(block.input.subagent_type || block.input.agentType || '')
       this.subagentChildNames.set(block.id, childName)
       // Only emit spawn once per subagent name (file watcher may have already spawned it)
       const session = sessionId ? this.delegate.getSession(sessionId) : undefined
       if (!session?.spawnedSubagents.has(childName)) {
         session?.spawnedSubagents.add(childName)
-        emitSubagentSpawn(this.delegate, agentName, childName, args, sessionId)
+        emitSubagentSpawn(this.delegate, agentName, childName, args, sessionId, agentType || undefined)
       }
     }
 

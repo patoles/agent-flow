@@ -251,7 +251,7 @@ export const CONTEXT_BAR = {
   widthMultiplier: 2.2,
   barHeight: 6,
   /** Y offset from agent radius */
-  yOffset: 22,
+  yOffset: 36,
   borderRadius: 3,
   /** Font for token count label */
   fontSize: 7,
