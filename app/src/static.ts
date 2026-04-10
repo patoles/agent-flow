@@ -31,15 +31,16 @@ const MIME_TYPES: Record<string, string> = {
 
 export function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
   const url = req.url || '/'
+  const pathname = url.split('?')[0]
 
-  if (url === '/' || url === '/index.html') {
+  if (pathname === '/' || pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html' })
     res.end(HTML_SHELL)
     return
   }
 
   // Only serve known asset files from the webview directory
-  const basename = path.basename(url)
+  const basename = path.basename(pathname)
   const ext = path.extname(basename)
   const mime = MIME_TYPES[ext]
 
