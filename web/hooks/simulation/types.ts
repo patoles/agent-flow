@@ -1,6 +1,7 @@
 import type {
   Agent,
   ToolCallNode,
+  ServiceNode,
   Particle,
   Edge,
   Discovery,
@@ -13,6 +14,7 @@ import type { SimulationNodeDatum, SimulationLinkDatum } from 'd3-force'
 export interface SimulationState {
   agents: Map<string, Agent>
   toolCalls: Map<string, ToolCallNode>
+  serviceNodes: Map<string, ServiceNode>
   particles: Particle[]
   edges: Edge[]
   discoveries: Discovery[]
@@ -33,6 +35,7 @@ export function createEmptyState(overrides?: Partial<SimulationState>): Simulati
   return {
     agents: new Map(),
     toolCalls: new Map(),
+    serviceNodes: new Map(),
     particles: [],
     edges: [],
     discoveries: [],

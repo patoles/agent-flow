@@ -286,6 +286,29 @@ export const STATS_OVERLAY = {
   textPaddingY: 4,
 } as const
 
+// ─── Service node drawing constants ─────────────────────────────────────────
+
+export const SERVICE_NODE = {
+  /** Radius of the hexagonal service node */
+  radius: 22,
+  /** Glow padding */
+  glowPadding: 12,
+  /** Label Y offset below the hex */
+  labelYOffset: 8,
+  /** Label width multiplier */
+  labelWidthMultiplier: 4,
+  /** Stats font size */
+  statsFontSize: 7,
+  /** Stats Y offset below label */
+  statsYOffset: 12,
+  /** Icon font size (emoji) */
+  iconFontSize: 14,
+  /** Pulse speed for active service */
+  pulseSpeed: 2,
+  /** Spawn distance from connected agents */
+  spawnDistance: 300,
+} as const
+
 // ─── Tool card drawing constants ────────────────────────────────────────────
 
 export const TOOL_DRAW = {

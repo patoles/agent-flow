@@ -75,6 +75,13 @@ export const COLORS = {
   liveResumeBg: 'rgba(255, 68, 68, 0.15)',
   liveResumeBorder: 'rgba(255, 68, 68, 0.35)',
 
+  // Service node colors
+  service: '#ff88cc',
+  serviceGlow: '#ff66bb',
+  serviceBg: 'rgba(255, 136, 204,',
+  serviceText: '#ffbbdd',
+  serviceDim: '#ff88cc80',
+
   // Discovery type colors
   discoveryFile: '#66ccff',
   discoveryPattern: '#cc88ff',

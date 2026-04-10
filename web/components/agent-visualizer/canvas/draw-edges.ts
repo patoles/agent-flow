@@ -1,4 +1,4 @@
-import { Agent, ToolCallNode, Particle, Edge, BEAM, ANIM } from '@/lib/agent-types'
+import { Agent, ToolCallNode, ServiceNode, Particle, Edge, BEAM, ANIM } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { alphaHex } from '@/lib/utils'
 import { MIN_VISIBLE_OPACITY } from '@/lib/canvas-constants'
@@ -8,15 +8,19 @@ export function bezierPoint(t: number, p0: number, p1: number, p2: number, p3: n
   return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3
 }
 
-/** Resolve edge endpoint to {x, y} from either agents or toolCalls map */
+/** Resolve edge endpoint to {x, y} from agents, toolCalls, or serviceNodes map */
 export function resolveEdgeTarget(
   edge: Edge, agents: Map<string, Agent>, toolCalls: Map<string, ToolCallNode>,
-  minOpacity = 0,
+  minOpacity = 0, serviceNodes?: Map<string, ServiceNode>,
 ): { x: number; y: number } | null {
   const toAgent = agents.get(edge.to)
   if (toAgent && toAgent.opacity >= minOpacity) return toAgent
   const toTool = toolCalls.get(edge.to)
   if (toTool && toTool.opacity >= minOpacity) return toTool
+  if (serviceNodes) {
+    const toService = serviceNodes.get(edge.to)
+    if (toService && toService.opacity >= minOpacity) return toService
+  }
   return null
 }
 
@@ -105,12 +109,13 @@ export function drawEdges(
   toolCalls: Map<string, ToolCallNode>,
   activeEdgeIds: Set<string>,
   time: number,
+  serviceNodes?: Map<string, ServiceNode>,
 ) {
   for (const edge of edges) {
     const fromAgent = agents.get(edge.from)
     if (!fromAgent || fromAgent.opacity < MIN_VISIBLE_OPACITY) continue
 
-    const target = resolveEdgeTarget(edge, agents, toolCalls, MIN_VISIBLE_OPACITY)
+    const target = resolveEdgeTarget(edge, agents, toolCalls, MIN_VISIBLE_OPACITY, serviceNodes)
     if (!target) continue
     const toX = target.x, toY = target.y
 
@@ -123,8 +128,8 @@ export function drawEdges(
     if (!cp) continue
     const { cp1x, cp1y, cp2x, cp2y } = cp
 
-    const beamColor = edge.type === 'tool' ? COLORS.tool : COLORS.holoBase
-    const bw = edge.type === 'tool' ? BEAM.tool : BEAM.parentChild
+    const beamColor = edge.type === 'service' ? COLORS.service : edge.type === 'tool' ? COLORS.tool : COLORS.holoBase
+    const bw = edge.type === 'tool' ? BEAM.tool : edge.type === 'service' ? BEAM.parentChild : BEAM.parentChild
 
     ctx.save()
 

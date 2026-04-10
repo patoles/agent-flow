@@ -37,14 +37,21 @@ export function snapVisualState(state: SimulationState, targetTime: number): Sim
     newToolCalls.set(id, snapped)
   }
 
+  // Snap service nodes
+  const newServiceNodes = new Map(state.serviceNodes)
+  for (const [id, svc] of newServiceNodes) {
+    newServiceNodes.set(id, { ...svc, opacity: 1, scale: 1 })
+  }
+
   // Filter edges: only keep edges where both endpoints are visible
   const newEdges = state.edges
     .map(e => {
       const fromAgent = newAgents.get(e.from)
       const toAgent = newAgents.get(e.to)
       const toTool = newToolCalls.get(e.to)
+      const toService = newServiceNodes.get(e.to)
       const fromVisible = fromAgent && fromAgent.opacity > MIN_VISIBLE_OPACITY
-      const toVisible = (toAgent && toAgent.opacity > MIN_VISIBLE_OPACITY) || (toTool && toTool.opacity > MIN_VISIBLE_OPACITY)
+      const toVisible = (toAgent && toAgent.opacity > MIN_VISIBLE_OPACITY) || (toTool && toTool.opacity > MIN_VISIBLE_OPACITY) || (toService && toService.opacity > MIN_VISIBLE_OPACITY)
       return { ...e, opacity: (fromVisible && toVisible) ? 1 : 0 }
     })
     .filter(e => e.opacity > 0)
@@ -56,7 +63,7 @@ export function snapVisualState(state: SimulationState, targetTime: number): Sim
 
   return {
     ...state,
-    agents: newAgents, toolCalls: newToolCalls,
+    agents: newAgents, toolCalls: newToolCalls, serviceNodes: newServiceNodes,
     edges: newEdges, particles: [], discoveries: newDiscoveries,
   }
 }

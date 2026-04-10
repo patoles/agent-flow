@@ -1,4 +1,4 @@
-import { Agent, ToolCallNode, Particle, Edge, BEAM, FX } from '@/lib/agent-types'
+import { Agent, ToolCallNode, ServiceNode, Particle, Edge, BEAM, FX } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { PARTICLE_DRAW } from '@/lib/canvas-constants'
 import { alphaHex } from '@/lib/utils'
@@ -19,6 +19,7 @@ export function drawParticles(
   agents: Map<string, Agent>,
   toolCalls: Map<string, ToolCallNode>,
   time: number,
+  serviceNodes?: Map<string, ServiceNode>,
 ) {
   for (const particle of particles) {
     const edge = edgeMap.get(particle.edgeId)
@@ -27,7 +28,7 @@ export function drawParticles(
     const fromAgent = agents.get(edge.from)
     if (!fromAgent) continue
 
-    const target = resolveEdgeTarget(edge, agents, toolCalls)
+    const target = resolveEdgeTarget(edge, agents, toolCalls, 0, serviceNodes)
     if (!target) continue
     const toX = target.x, toY = target.y
 
