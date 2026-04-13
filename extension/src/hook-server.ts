@@ -255,18 +255,18 @@ export class HookServer implements vscode.Disposable {
   }
 
   private handleSubagentStart(payload: HookPayload): void {
-    const parentName = this.resolveAgentName(payload)
+    // Track agent_id → name mapping for SubagentStop resolution, but do not
+    // emit agent_spawn here.  The transcript parser independently spawns the
+    // subagent using its description field (via resolveSubagentChildName),
+    // which produces the user-facing name.  Emitting a second spawn from the
+    // hook creates a duplicate node with a generic name like
+    // "general-purpose-ab75a" alongside the correctly-named node.
     const agentType = payload.agent_type || 'subagent'
     const agentId = payload.agent_id || ''
     const sessionAgents = this.getOrCreateSession(payload.session_id).agentNames
     const childName = agentId ? `${agentType}-${agentId.slice(-SUBAGENT_ID_SUFFIX_LENGTH)}` : generateSubagentFallbackName(String(Date.now()), sessionAgents.size + 1)
 
     sessionAgents.set(agentId, childName)
-
-    emitSubagentSpawn(
-      { emit: (e, s) => this.emit(e, s), elapsed: (s) => this.elapsedSeconds(s) },
-      parentName, childName, agentType, payload.session_id,
-    )
   }
 
   private handleSubagentStop(payload: HookPayload): void {
