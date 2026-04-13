@@ -51,7 +51,6 @@ export function createEmptyState(overrides?: Partial<SimulationState>): Simulati
 
 let _msgIdCounter = 0
 export function nextMsgId(): string { return `msg-${_msgIdCounter++}` }
-export function resetMsgIdCounter(): void { /* noop — keep counter monotonic to avoid duplicate React keys */ }
 
 export interface ConversationMessage {
   id: string

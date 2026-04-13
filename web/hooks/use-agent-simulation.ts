@@ -13,7 +13,7 @@ import { TOOL_CARD_W, TOOL_CARD_H, FORCE, TOOL_SLOT, BUBBLE_VISIBLE_S, MODEL_CON
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation } from 'd3-force'
 
 import type { SimulationState, ForceNode, ForceLink, UseAgentSimulationOptions } from './simulation/types'
-import { createEmptyState, resetMsgIdCounter, MAX_EVENT_LOG } from './simulation/types'
+import { createEmptyState, MAX_EVENT_LOG } from './simulation/types'
 import { processEvent, type ProcessEventContext } from './simulation/process-event'
 import { computeNextFrame } from './simulation/animate'
 import { snapVisualState } from './simulation/snap-visual-state'
@@ -312,7 +312,6 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
 
   const restart = useCallback((keepActive = false) => {
     blockIdCounter.current = 0
-    resetMsgIdCounter()
     if (!keepActive) {
       commitState(createEmptyState({ isPlaying: true, speed: frameRef.current.speed }))
       return
