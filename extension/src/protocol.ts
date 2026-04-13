@@ -43,7 +43,7 @@ export type ExtensionToWebviewMessage =
   | { type: 'agent-event'; event: AgentEvent }
   | { type: 'agent-event-batch'; events: AgentEvent[] }
   | { type: 'reset'; reason: string }
-  | { type: 'config'; config: VisualizerConfig }
+  | { type: 'config'; config: Partial<VisualizerConfig> }
   | { type: 'session-list'; sessions: SessionInfo[] }
   | { type: 'session-started'; session: SessionInfo }
   | { type: 'session-ended'; sessionId: string }
@@ -53,6 +53,7 @@ export interface VisualizerConfig {
   mode: 'live' | 'replay'
   autoPlay: boolean
   showMockData: boolean
+  disable1MContext: boolean
 }
 
 // ─── Webview → Extension Messages ────────────────────────────────────────────

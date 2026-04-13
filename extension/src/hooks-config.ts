@@ -13,6 +13,19 @@ import { createLogger } from './logger'
 
 const log = createLogger('Hooks')
 
+const GLOBAL_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json')
+
+/** Read and parse Claude Code's global settings.json. Returns null on failure. */
+function readGlobalSettings(): Record<string, unknown> | null {
+  try {
+    if (!fs.existsSync(GLOBAL_SETTINGS_PATH)) { return null }
+    return JSON.parse(fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf-8'))
+  } catch (err) {
+    log.debug('Failed to read Claude settings:', err)
+    return null
+  }
+}
+
 /** Check whether a single hook entry belongs to Agent Flow */
 function isAgentFlowHook(entry: ClaudeHookEntry): boolean {
   return !!entry.hooks?.some(h =>
@@ -24,8 +37,7 @@ function isAgentFlowHook(entry: ClaudeHookEntry): boolean {
 // ─── Detection ────────────────────────────────────────────────────────────────
 
 function hooksAlreadyConfigured(): boolean {
-  const globalPath = path.join(os.homedir(), '.claude', 'settings.json')
-  if (hasAgentFlowHooks(globalPath)) { return true }
+  if (hasAgentFlowHooks(GLOBAL_SETTINGS_PATH)) { return true }
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
   if (workspaceFolder) {
@@ -76,17 +88,8 @@ export async function configureClaudeHooks(): Promise<void> {
     SessionEnd: [hookEntry],
   }
 
-  const settingsPath = path.join(os.homedir(), '.claude', 'settings.json')
-
   // Read existing settings
-  let settings: Record<string, unknown> = {}
-  try {
-    if (fs.existsSync(settingsPath)) {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
-    }
-  } catch (err) {
-    log.debug('Could not read existing settings, starting fresh:', err)
-  }
+  let settings: Record<string, unknown> = readGlobalSettings() ?? {}
 
   // Merge hooks — preserve existing hooks, replace ours
   const existingHooks = (settings.hooks || {}) as Record<string, unknown[]>
@@ -100,11 +103,11 @@ export async function configureClaudeHooks(): Promise<void> {
   settings.hooks = existingHooks
 
   // Write
-  const dir = path.dirname(settingsPath)
+  const dir = path.dirname(GLOBAL_SETTINGS_PATH)
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true })
   }
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+  fs.writeFileSync(GLOBAL_SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n')
 
   vscode.window.showInformationMessage(
     'Claude Code hooks configured. New sessions will stream events to Agent Flow.',
@@ -116,9 +119,7 @@ export async function configureClaudeHooks(): Promise<void> {
 /** Replace legacy HTTP hooks with command hooks. Called once on activation.
  *  Caller must call ensureHookScript() first. */
 export function migrateHttpHooks(): void {
-  const pathsToCheck: string[] = [
-    path.join(os.homedir(), '.claude', 'settings.json'),
-  ]
+  const pathsToCheck: string[] = [GLOBAL_SETTINGS_PATH]
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
   if (workspaceFolder) {
     pathsToCheck.push(path.join(workspaceFolder, '.claude', 'settings.local.json'))
@@ -165,6 +166,15 @@ export function migrateHttpHooks(): void {
       log.error(`Failed to migrate ${settingsPath}:`, err)
     }
   }
+}
+
+// ─── Claude Code Environment ─────────────────────────────────────────────────
+
+/** Check whether CLAUDE_CODE_DISABLE_1M_CONTEXT is set (via env or Claude Code settings). */
+export function isDisable1MContext(): boolean {
+  if (process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT === '1') { return true }
+  const settings = readGlobalSettings()
+  return (settings?.env as Record<string, unknown>)?.CLAUDE_CODE_DISABLE_1M_CONTEXT === '1'
 }
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────

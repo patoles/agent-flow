@@ -13,6 +13,8 @@ interface BridgeHookResult {
   consumeEvents: () => void
   /** Whether to show mock data (standalone mode or explicit config) */
   useMockData: boolean
+  /** Whether CLAUDE_CODE_DISABLE_1M_CONTEXT=1 is set — caps context window to 200k */
+  disable1MContext: boolean
   /** Open a file in the VS Code editor */
   bridgeOpenFile: (filePath: string, line?: number) => void
   /** Known sessions from the extension */
@@ -47,6 +49,7 @@ export function useVSCodeBridge(): BridgeHookResult {
   const [useMockData, setUseMockData] = useState(
     process.env.NEXT_PUBLIC_DEMO !== '0'
   )
+  const [disable1MContext, setDisable1MContext] = useState(false)
   const pendingEventsRef = useRef<SimulationEvent[]>([])
   const [, setEventVersion] = useState(0) // trigger re-render on new events
 
@@ -158,7 +161,8 @@ export function useVSCodeBridge(): BridgeHookResult {
     })
 
     const unsubConfig = bridge.onConfig((config) => {
-      setUseMockData(config.showMockData)
+      if (config.showMockData !== undefined) { setUseMockData(config.showMockData) }
+      if (config.disable1MContext !== undefined) { setDisable1MContext(config.disable1MContext) }
     })
 
     // Session lifecycle tracking
@@ -301,6 +305,7 @@ export function useVSCodeBridge(): BridgeHookResult {
     pendingEvents: pendingEventsRef.current,
     consumeEvents,
     useMockData,
+    disable1MContext,
     bridgeOpenFile,
     sessions,
     selectedSessionId,

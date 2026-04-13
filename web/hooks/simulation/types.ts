@@ -122,4 +122,6 @@ export interface UseAgentSimulationOptions {
   sessionFilter?: string | null
   /** Ref updated synchronously when session changes (avoids stale closure in rAF) */
   sessionFilterRef?: React.RefObject<string | null>
+  /** If true, CLAUDE_CODE_DISABLE_1M_CONTEXT is set — cap context window to 200k */
+  disable1MContext?: boolean
 }

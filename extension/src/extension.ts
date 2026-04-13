@@ -11,6 +11,7 @@ import {
 import {
   promptHookSetupIfNeeded,
   configureClaudeHooks, migrateHttpHooks,
+  isDisable1MContext,
 } from './hooks-config'
 import {
   writeDiscoveryFile, removeDiscoveryFile,
@@ -241,6 +242,10 @@ function wirePanel(panel: VisualizerPanel): void {
         panel.markReady()
         // Clear stale webview state from any previous panel instance
         panel.postMessage({ type: 'reset', reason: 'panel-reopened' })
+        // Send environment-derived config (e.g. CLAUDE_CODE_DISABLE_1M_CONTEXT)
+        if (isDisable1MContext()) {
+          panel.postMessage({ type: 'config', config: { disable1MContext: true } })
+        }
         // Report current connection status and replay active sessions
         if (sessionWatcher) {
           // Send session list FIRST so the webview selects a session

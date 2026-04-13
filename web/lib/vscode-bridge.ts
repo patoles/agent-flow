@@ -12,7 +12,7 @@ import type { AgentEvent, SessionInfo, ConnectionStatus } from './bridge-types'
 type InitCallback = () => void
 type EventCallback = (event: AgentEvent) => void
 type StatusCallback = (status: ConnectionStatus, source: string) => void
-type ConfigCallback = (config: { mode: string; autoPlay: boolean; showMockData: boolean }) => void
+type ConfigCallback = (config: Partial<{ mode: string; autoPlay: boolean; showMockData: boolean; disable1MContext: boolean }>) => void
 type SessionCallback = (type: 'list' | 'started' | 'ended' | 'updated' | 'reset', data: SessionInfo[] | SessionInfo | string | { sessionId: string; label: string }) => void
 
 class VSCodeBridge {

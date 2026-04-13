@@ -58,6 +58,7 @@ export function AgentVisualizer() {
     // Pass the ref that's updated synchronously in session-started handler,
     // so the animation frame never uses a stale filter value.
     sessionFilterRef: bridge.selectedSessionIdRef,
+    disable1MContext: bridge.disable1MContext,
   })
 
   const selection = useSelectionState({ agents, toolCalls, discoveries })
