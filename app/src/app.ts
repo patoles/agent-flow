@@ -24,6 +24,6 @@ ensureSetup()
 startServer({
   port: args.port,
   openBrowser: args.open,
-  workspace: process.cwd(),
+  workspace: process.env.AGENT_FLOW_WORKSPACE ?? process.cwd(),
   verbose: args.verbose,
 })

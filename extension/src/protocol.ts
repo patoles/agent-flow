@@ -34,6 +34,7 @@ export interface SessionInfo {
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number
+  workspace?: string
 }
 
 // ─── Extension → Webview Messages ────────────────────────────────────────────
@@ -168,6 +169,7 @@ export interface SubagentState {
 export interface WatchedSession {
   sessionId: string
   filePath: string
+  workspace?: string
   fileWatcher: import('fs').FSWatcher | null
   pollTimer: NodeJS.Timeout | null
   fileSize: number

@@ -19,6 +19,7 @@ export interface SessionInfo {
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number
+  workspace?: string
 }
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'watching'

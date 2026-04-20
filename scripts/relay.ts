@@ -70,11 +70,11 @@ function broadcastEvent(event: AgentEvent) {
   broadcast(JSON.stringify({ type: 'agent-event', event }))
 }
 
-function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessionId: string, label: string) {
+function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessionId: string, label: string, workspace?: string) {
   if (type === 'started') {
     broadcast(JSON.stringify({
       type: 'session-started',
-      session: { id: sessionId, label, status: 'active', startTime: Date.now(), lastActivityTime: Date.now() } as SessionInfo,
+      session: { id: sessionId, label, status: 'active', startTime: Date.now(), lastActivityTime: Date.now(), workspace } as SessionInfo,
     }))
   } else if (type === 'ended') {
     broadcast(JSON.stringify({ type: 'session-ended', sessionId }))
@@ -114,7 +114,10 @@ const parser = new TranscriptParser({
   emit: emitEvent,
   elapsed,
   getSession: (sessionId: string) => sessions.get(sessionId),
-  fireSessionLifecycle: (event) => broadcastSessionLifecycle(event.type, event.sessionId, event.label),
+  fireSessionLifecycle: (event) => {
+    const session = event.sessionId ? sessions.get(event.sessionId) : null
+    broadcastSessionLifecycle(event.type, event.sessionId, event.label, session?.workspace)
+  },
   emitContextUpdate,
 })
 
@@ -141,7 +144,7 @@ function resetInactivityTimer(sessionId: string) {
       payload: { name: ORCHESTRATOR_NAME, isMain: true, task: session.label, ...(session.model ? { model: session.model } : {}) },
       sessionId,
     })
-    broadcastSessionLifecycle('started', sessionId, session.label)
+    broadcastSessionLifecycle('started', sessionId, session.label, session.workspace)
   }
 
   if (session.inactivityTimer) clearTimeout(session.inactivityTimer)
@@ -160,10 +163,10 @@ function resetInactivityTimer(sessionId: string) {
   }, INACTIVITY_TIMEOUT_MS)
 }
 
-function watchSession(sessionId: string, filePath: string) {
+function watchSession(sessionId: string, filePath: string, workspace: string) {
   const defaultLabel = `Session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`
   const session: WatchedSession = {
-    sessionId, filePath,
+    sessionId, filePath, workspace,
     fileWatcher: null, pollTimer: null, fileSize: 0,
     sessionStartTime: Date.now(),
     pendingToolCalls: new Map(),
@@ -188,7 +191,7 @@ function watchSession(sessionId: string, filePath: string) {
   session.fileSize = stat.size
   parser.extractSessionLabel(catchUpEntries, session)
 
-  broadcastSessionLifecycle('started', sessionId, session.label)
+  broadcastSessionLifecycle('started', sessionId, session.label, session.workspace)
   broadcastEvent({
     time: 0, type: 'agent_spawn',
     payload: { name: ORCHESTRATOR_NAME, isMain: true, task: session.label, ...(session.model ? { model: session.model } : {}) },
@@ -236,30 +239,44 @@ function readNewLines(sessionId: string) {
 
 // ─── Session scanner ────────────────────────────────────────────────────────
 
-function scanForActiveSessions(workspace: string) {
+/** Best-effort decode a project directory name back to a workspace path.
+ *  The encoding replaces all non-alphanumeric chars with '-', so we can't
+ *  perfectly reverse it. Store the mapping via a reverse lookup table. */
+const workspacePathCache = new Map<string, string>()
+
+function buildWorkspacePathCache() {
   if (!fs.existsSync(CLAUDE_DIR)) return
-
-  let resolved = workspace
-  try { resolved = fs.realpathSync(resolved) } catch {}
-  const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
-
-  const dirsToScan: string[] = []
-  const projectDir = path.join(CLAUDE_DIR, encoded)
-  if (fs.existsSync(projectDir)) dirsToScan.push(projectDir)
-
   try {
     for (const dir of fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })) {
       if (!dir.isDirectory()) continue
-      const fullPath = path.join(CLAUDE_DIR, dir.name)
-      if (fullPath === projectDir) continue
-      if (dir.name.startsWith(encoded + '-')) {
-        dirsToScan.push(fullPath)
-      }
+      // The encoded dir name maps back to whatever workspace was used to create it.
+      // Since we can't reverse the encoding, we store dirName → resolved path by
+      // scanning known workspaces. Instead, we derive from the parent: each
+      // project dir under ~/.claude/projects/ corresponds to one workspace.
+      // We store the encoded name as a proxy and match it during filtering.
+      workspacePathCache.set(dir.name, dir.name)
+    }
+  } catch {}
+}
+
+// Initialise once
+buildWorkspacePathCache()
+
+function scanForActiveSessions(workspace: string, loadAll: boolean) {
+  if (!fs.existsSync(CLAUDE_DIR)) return
+
+  // Scan ALL project directories under ~/.claude/projects/
+  const dirsToScan: string[] = []
+  try {
+    for (const dir of fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue
+      dirsToScan.push(path.join(CLAUDE_DIR, dir.name))
     }
   } catch {}
 
   for (const dirPath of dirsToScan) {
     try {
+      const encodedWorkspace = path.basename(dirPath)
       for (const file of fs.readdirSync(dirPath)) {
         if (!file.endsWith('.jsonl')) continue
         const filePath = path.join(dirPath, file)
@@ -279,8 +296,9 @@ function scanForActiveSessions(workspace: string) {
         } catch {}
 
         const ageSeconds = (Date.now() - newestMtime) / 1000
-        if (ageSeconds <= ACTIVE_SESSION_AGE_S && !sessions.has(sessionId)) {
-          watchSession(sessionId, filePath)
+        if ((loadAll || ageSeconds <= ACTIVE_SESSION_AGE_S) && !sessions.has(sessionId)) {
+          // Store the encoded workspace name so the frontend can match it
+          watchSession(sessionId, filePath, encodedWorkspace)
         }
       }
     } catch {}
@@ -326,10 +344,13 @@ export interface Relay {
 export interface RelayOptions {
   workspace: string
   verbose?: boolean
+  /** Load all sessions for the workspace, ignoring the 10-minute activity window. */
+  loadAllSessions?: boolean
 }
 
 export async function createRelay(options: RelayOptions): Promise<Relay> {
   const { workspace } = options
+  const loadAllSessions = options.loadAllSessions ?? false
   verbose = options.verbose ?? false
   if (!verbose) setLogLevel('error')
   if (relayCreated) {
@@ -349,17 +370,18 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
 
   writeDiscoveryFile(hookPort, workspace)
 
-  scanForActiveSessions(workspace)
-  const scanInterval = setInterval(() => scanForActiveSessions(workspace), SCAN_INTERVAL_MS)
+  scanForActiveSessions(workspace, loadAllSessions)
+  const scanInterval = setInterval(() => scanForActiveSessions(workspace, loadAllSessions), SCAN_INTERVAL_MS)
 
-  const resolved = (() => { try { return fs.realpathSync(workspace) } catch { return workspace } })()
-  const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
-  const projectDir = path.join(CLAUDE_DIR, encoded)
+  // Watch all project directories for new .jsonl files
   let projectDirWatcher: fs.FSWatcher | null = null
-  if (fs.existsSync(projectDir)) {
+  if (fs.existsSync(CLAUDE_DIR)) {
     try {
-      projectDirWatcher = fs.watch(projectDir, (_eventType, filename) => {
-        if (filename?.endsWith('.jsonl')) scanForActiveSessions(workspace)
+      projectDirWatcher = fs.watch(CLAUDE_DIR, (_eventType, filename) => {
+        if (filename?.endsWith('.jsonl')) {
+          // A new jsonl appeared in a project dir — rescan all
+          scanForActiveSessions(workspace, loadAllSessions)
+        }
       })
     } catch {}
   }
@@ -388,23 +410,18 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
           id: session.sessionId, label: session.label,
           status: session.sessionCompleted ? 'completed' : 'active',
           startTime: session.sessionStartTime, lastActivityTime: session.lastActivityTime,
+          workspace: session.workspace,
         })
       }
       if (sessionList.length > 0) {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }
 
-      // Replay buffered events for the most recent active session
-      const sorted = [...sessionList].sort((a, b) => {
-        const aActive = a.status === 'active' ? 1 : 0
-        const bActive = b.status === 'active' ? 1 : 0
-        if (aActive !== bActive) return bActive - aActive
-        return b.lastActivityTime - a.lastActivityTime
-      })
-      if (sorted.length > 0) {
-        const buffered = eventBuffer.get(sorted[0].id)
-        if (buffered) {
-          sendSSE(res, { type: 'agent-event-batch', events: buffered })
+      // Replay buffered events for all sessions so the frontend can
+      // display any session selected via workspace-filtered session-list.
+      for (const [sessionId, buffered] of eventBuffer) {
+        if (buffered.length > 0) {
+          sendSSE(res, { type: 'agent-event-batch', sessionId, events: buffered })
         }
       }
     },

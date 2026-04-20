@@ -18,7 +18,7 @@ interface ServerOptions {
 export async function startServer(options: ServerOptions) {
   const { port, openBrowser, workspace } = options
 
-  const relay = await createRelay({ workspace, verbose: options.verbose })
+  const relay = await createRelay({ workspace, verbose: options.verbose, loadAllSessions: true })
 
   const server = http.createServer((req, res) => {
     // SSE endpoint

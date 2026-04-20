@@ -53,6 +53,17 @@ export function useVSCodeBridge(): BridgeHookResult {
   const pendingEventsRef = useRef<SimulationEvent[]>([])
   const [, setEventVersion] = useState(0) // trigger re-render on new events
 
+  // Read target workspace from URL query params for filtering.
+  // The relay stores the encoded project directory name (non-alphanumeric → '-').
+  // Encode the URL workspace the same way for matching.
+  const rawWorkspace = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('workspace')
+    : null
+  const targetWorkspace = rawWorkspace
+    ? rawWorkspace.replace(/[^a-zA-Z0-9]/g, '-')
+    : null
+  const targetWorkspaceRef = useRef<string | null>(targetWorkspace)
+
   // Session state
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
@@ -183,7 +194,9 @@ export function useVSCodeBridge(): BridgeHookResult {
         return
       }
       if (type === 'list') {
-        const sessionList = data as SessionInfo[]
+        const allSessions = data as SessionInfo[]
+        const tw = targetWorkspaceRef.current
+        const sessionList = tw ? allSessions.filter(s => !s.workspace || s.workspace === tw) : allSessions
         setSessions(sessionList)
         // Auto-select: prefer active sessions, then most recently active.
         // Only set selection — useLayoutEffect handles flushing events.
@@ -202,6 +215,8 @@ export function useVSCodeBridge(): BridgeHookResult {
         }
       } else if (type === 'started') {
         const session = data as SessionInfo
+        const tw = targetWorkspaceRef.current
+        if (tw && session.workspace && session.workspace !== tw) return
         setSessions(prev => {
           const existing = prev.find(s => s.id === session.id)
           if (existing) {
