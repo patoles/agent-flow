@@ -1,5 +1,5 @@
 {
-  "name": "agent-flow-app",
+  "name": "@alife/agent-flow-app",
   "version": "0.6.2",
   "description": "Real-time visualization of AI agent orchestration — standalone web app",
   "bin": {
