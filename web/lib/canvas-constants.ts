@@ -1,10 +1,14 @@
 // ─── Model context sizes ────────────────────────────────────────────────────
 
-export const MODEL_CONTEXT_SIZES: Record<string, number> = {
-  'opus-4-6': 1_000_000,
-  'sonnet-4-6': 1_000_000,
-}
+/** Context window size by model family. Patterns are checked in order;
+ *  first match wins. Matched against lower-cased model IDs. */
+export const MODEL_FAMILY_CONTEXT: ReadonlyArray<{ pattern: RegExp; size: number }> = [
+  { pattern: /(opus|sonnet)-\d/, size: 1_000_000 },
+  { pattern: /haiku-\d/, size: 200_000 },
+]
+/** Used when no family pattern matches (unknown model). */
 export const DEFAULT_CONTEXT_SIZE = 200_000
+/** Used when no model ID is available at all. */
 export const FALLBACK_CONTEXT_SIZE = 1_000_000
 
 // ─── Visibility threshold ───────────────────────────────────────────────────
