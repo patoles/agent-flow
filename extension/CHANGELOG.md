@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0
+
+- **Codex runtime support.** Agent Flow now watches Codex rollouts at `~/.codex/sessions/**/rollout-*.jsonl` alongside Claude Code sessions
+  - New `agentVisualizer.runtime` setting: `"auto"` (default, watches both), `"claude"`, or `"codex"`
+  - Respects `CODEX_HOME` for non-default installs
+  - Parses all five Codex rollout record types (`session_meta`, `turn_context`, `response_item`, `event_msg`, `compacted`) — surfaces tool calls (`exec_command`, `apply_patch`, `write_stdin`, `update_plan`), reasoning, web searches
+  - Uses Codex's own authoritative token counts (`event_msg.token_count.info.last_token_usage.input_tokens` and `model_context_window`) instead of estimating
+  - Handles auto-compaction via the `compacted` event — context gauge resets cleanly instead of staying frozen
+  - Filters Codex's IDE-context wrapper (`# Context from my IDE setup:` + `## My request for Codex:`) and pure injections (AGENTS.md, environment_context, turn_aborted) from user messages
+- Refactor: new `AgentSessionWatcher` interface and shared watcher→panel wiring (`session-runtime.ts`) replaces per-runtime duplication
+- Parser unit test suite with real-shape rollout fixture — run via `pnpm test`
+
 ## 0.7.0
 
 - **Opus 4.7 support** (#43)

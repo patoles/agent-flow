@@ -1,6 +1,6 @@
 # Agent Flow
 
-Real-time visualization of Claude Code agent orchestration. Watch your agents think, branch, and coordinate as they work. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA). 
+Real-time visualization of Claude Code and Codex agent orchestration. Watch your agents think, branch, and coordinate as they work. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA). 
 
 ![Agent Flow visualization](https://res.cloudinary.com/dxlvclh9c/image/upload/v1773924941/screenshot_e7yox3.png)
 
@@ -18,8 +18,9 @@ Claude Code is powerful, but its execution is a black box — you see the final 
 ## Features
 
 - **Live agent visualization**: Watch agent execution as an interactive node graph with real-time tool calls, branching, and return flows
-- **Auto-detect Claude Code sessions**: Automatically discovers active Claude Code sessions in your workspace and streams events
+- **Claude Code + Codex**: Auto-detects sessions from both runtimes concurrently and shows them side-by-side, or restrict to one via the `agentVisualizer.runtime` setting
 - **Claude Code hooks**: Lightweight HTTP hook server receives events directly from Claude Code for zero-latency streaming
+- **Codex rollout tailing**: Reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and surfaces tool calls, reasoning, and authoritative token counts from Codex's own event stream
 - **Multi-session support**: Track multiple concurrent agent sessions with tabs
 - **Interactive canvas**: Pan, zoom, click agents and tool calls to inspect details
 - **Timeline & transcript panels**: Review the full execution timeline, file attention heatmap, and message transcript
@@ -86,6 +87,7 @@ You can also point Agent Flow at a JSONL event log file:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `agentVisualizer.runtime` | `"auto"` | Which agent runtime(s) to watch: `"auto"` (both), `"claude"`, or `"codex"` |
 | `agentVisualizer.devServerPort` | `0` | Development server port (0 = production mode) |
 | `agentVisualizer.eventLogPath` | `""` | Path to a JSONL event log file to watch |
 | `agentVisualizer.autoOpen` | `false` | Auto-open when an agent session starts |
