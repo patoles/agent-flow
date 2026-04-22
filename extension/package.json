@@ -1,7 +1,7 @@
 {
   "name": "agent-flow",
   "displayName": "Agent Flow",
-  "description": "Real-time visualization of Claude Code agent orchestration",
+  "description": "Real-time visualization of Claude Code and Codex agent orchestration",
   "version": "0.8.0",
   "publisher": "simon-p",
   "license": "Apache-2.0",
@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Visualization", "Other"],
-  "keywords": ["llm", "agent", "claude", "ai", "visualization", "orchestration"],
+  "keywords": ["llm", "agent", "claude", "codex", "ai", "visualization", "orchestration"],
   "activationEvents": [
     "onWebviewPanel:agentVisualizer"
   ],
@@ -84,6 +84,7 @@
     "watch": "node esbuild.js --watch",
     "package": "vsce package",
     "lint": "tsc --noEmit",
+    "lint:test": "tsc --noEmit --project tsconfig.test.json",
     "test": "tsx --test test/**/*.test.ts",
     "vscode:uninstall": "node scripts/uninstall.js"
   },
