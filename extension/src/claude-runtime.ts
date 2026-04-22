@@ -19,14 +19,14 @@ import { SessionWatcher } from './session-watcher'
 import { VisualizerPanel } from './webview-provider'
 import { AgentEvent } from './protocol'
 import {
-  ORCHESTRATOR_NAME, HOOK_SERVER_NOT_STARTED, SESSION_ID_DISPLAY,
-  STATUS_MESSAGE_DURATION_MS,
+  ORCHESTRATOR_NAME, HOOK_SERVER_NOT_STARTED,
 } from './constants'
 import { migrateHttpHooks } from './hooks-config'
 import {
   writeDiscoveryFile, removeDiscoveryFile, ensureHookScript,
 } from './discovery'
 import { createLogger } from './logger'
+import { wireWatcherToPanel } from './session-runtime'
 import type { AgentRuntime } from './session-runtime'
 
 const log = createLogger('ClaudeRuntime')
@@ -119,47 +119,10 @@ export async function startClaudeRuntime(
     })
   }
 
-  // Route watcher events → panel (with orchestrator completion filter)
-  watcher.onEvent((event) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (!panel || !panel.isReady) return
-    const filtered = filterOrchestratorCompletion(event)
-    if (filtered) panel.sendEvent(filtered)
-  })
-
-  watcher.onSessionDetected((sessionId) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (panel) {
-      const sessionCount = watcher.getActiveSessions().length
-      panel.setConnectionStatus('watching', sessionCount > 1
-        ? `${sessionCount} sessions`
-        : `Session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`)
-    }
-    vscode.window.setStatusBarMessage(
-      `Agent Visualizer: watching session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`,
-      STATUS_MESSAGE_DURATION_MS,
-    )
-  })
-
-  watcher.onSessionLifecycle((lifecycle) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (!panel) return
-    if (lifecycle.type === 'started') {
-      panel.postMessage({
-        type: 'session-started',
-        session: {
-          id: lifecycle.sessionId,
-          label: lifecycle.label,
-          status: 'active',
-          startTime: Date.now(),
-          lastActivityTime: Date.now(),
-        },
-      })
-    } else if (lifecycle.type === 'updated') {
-      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label })
-    } else {
-      panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
-    }
+  // Route watcher events + lifecycle → panel (with orchestrator completion filter)
+  wireWatcherToPanel(watcher, {
+    sessionLabelPrefix: 'Claude',
+    transformEvent: filterOrchestratorCompletion,
   })
 
   watcher.start()

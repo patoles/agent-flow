@@ -120,7 +120,6 @@ export interface CodexParserDelegate {
 // ─── Record shapes (structural typing, all fields optional) ────────────────
 
 interface RolloutRecord {
-  timestamp?: string
   type?: string
   payload?: unknown
 }
@@ -252,6 +251,12 @@ function extractOutputString(raw: FunctionCallOutputPayload['output']): string {
   return ''
 }
 
+/** Pull the first "*** Update File: /path" line out of an apply_patch body. */
+function extractPatchFilePath(patch: string): string | undefined {
+  const m = patch.match(/^\*\*\* (?:Update File|Add File|Delete File):\s*(.+)$/m)
+  return m ? m[1].trim() : undefined
+}
+
 // ─── Parser ────────────────────────────────────────────────────────────────
 
 export class CodexRolloutParser {
@@ -345,8 +350,8 @@ export class CodexRolloutParser {
         return this.handleCustomToolCallOutput(payload as CustomToolCallOutputPayload, state)
       case 'web_search_call':
         return this.handleWebSearchCall(payload as WebSearchCallPayload)
-      case 'reasoning':
-        return // handled via event_msg.agent_reasoning (plaintext) instead
+      // `reasoning` items carry encrypted_content + a short summary; we emit
+      // plaintext reasoning from event_msg.agent_reasoning instead.
     }
   }
 
@@ -618,10 +623,4 @@ export class CodexRolloutParser {
       },
     })
   }
-}
-
-/** Pull the first "*** Update File: /path" line out of an apply_patch body. */
-function extractPatchFilePath(patch: string): string | undefined {
-  const m = patch.match(/^\*\*\* (?:Update File|Add File|Delete File):\s*(.+)$/m)
-  return m ? m[1].trim() : undefined
 }

@@ -11,6 +11,8 @@
 
 import * as vscode from 'vscode'
 import type { AgentEvent, SessionInfo } from './protocol'
+import { VisualizerPanel } from './webview-provider'
+import { SESSION_ID_DISPLAY, STATUS_MESSAGE_DURATION_MS } from './constants'
 
 export type AgentRuntimeMode = 'claude' | 'codex'
 
@@ -40,4 +42,64 @@ export interface AgentRuntime {
   /** Human-readable connection status for the webview. May change over time. */
   connectionStatus(): string
   dispose(): void
+}
+
+/** Options for the default watcher → panel wiring. */
+export interface WatchPanelWiringOptions {
+  /** Human-readable prefix for the session badge (e.g. "Claude", "Codex"). */
+  sessionLabelPrefix: string
+  /** Optional event transform — return null to suppress an event. */
+  transformEvent?: (event: AgentEvent) => AgentEvent | null
+}
+
+/**
+ * Wire a watcher's event/lifecycle streams to the current visualizer panel.
+ * This is the boilerplate every runtime needs: forward events, broadcast
+ * session list changes, and reflect session detection in the status bar.
+ */
+export function wireWatcherToPanel(
+  watcher: AgentSessionWatcher,
+  options: WatchPanelWiringOptions,
+): void {
+  watcher.onEvent((event) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (!panel || !panel.isReady) return
+    const transformed = options.transformEvent ? options.transformEvent(event) : event
+    if (transformed) panel.sendEvent(transformed)
+  })
+
+  watcher.onSessionDetected((sessionId) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (panel) {
+      const sessionCount = watcher.getActiveSessions().length
+      panel.setConnectionStatus('watching', sessionCount > 1
+        ? `${sessionCount} ${options.sessionLabelPrefix} sessions`
+        : `${options.sessionLabelPrefix} ${sessionId.slice(0, SESSION_ID_DISPLAY)}`)
+    }
+    vscode.window.setStatusBarMessage(
+      `Agent Visualizer: watching ${options.sessionLabelPrefix} session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`,
+      STATUS_MESSAGE_DURATION_MS,
+    )
+  })
+
+  watcher.onSessionLifecycle((lifecycle) => {
+    const panel = VisualizerPanel.getCurrent()
+    if (!panel) return
+    if (lifecycle.type === 'started') {
+      panel.postMessage({
+        type: 'session-started',
+        session: {
+          id: lifecycle.sessionId,
+          label: lifecycle.label,
+          status: 'active',
+          startTime: Date.now(),
+          lastActivityTime: Date.now(),
+        },
+      })
+    } else if (lifecycle.type === 'updated') {
+      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label })
+    } else {
+      panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
+    }
+  })
 }

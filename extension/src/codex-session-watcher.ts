@@ -56,9 +56,8 @@ interface WatchedCodexSession {
   sessionDetected: boolean
   sessionCompleted: boolean
   label: string
-  model: string | null
-  cwd: string | null
   rolloutState: CodexRolloutState
+  parser: CodexRolloutParser
 }
 
 function codexHome(): string {
@@ -69,16 +68,27 @@ function sessionsRoot(): string {
   return path.join(codexHome(), 'sessions')
 }
 
-/** Walk the past SCAN_DAYS of sessions/YYYY/MM/DD directories relative to `now`. */
-function* recentSessionDirs(now: Date): Iterable<string> {
+/** Walk the past SCAN_DAYS of sessions/YYYY/MM/DD directories relative to `now`.
+ *  Codex's CLI partitioning can use either local or UTC dates depending on the
+ *  platform; yield both to be safe. The 3-day window + dedup-via-Set makes this
+ *  trivially cheap. */
+function recentSessionDirs(now: Date): string[] {
   const root = sessionsRoot()
+  const seen = new Set<string>()
   for (let i = 0; i < SCAN_DAYS; i++) {
     const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000)
-    const y = d.getUTCFullYear().toString()
-    const m = (d.getUTCMonth() + 1).toString().padStart(2, '0')
-    const day = d.getUTCDate().toString().padStart(2, '0')
-    yield path.join(root, y, m, day)
+    for (const [y, m, day] of [
+      [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()],
+      [d.getFullYear(), d.getMonth() + 1, d.getDate()],
+    ]) {
+      const dir = path.join(root,
+        String(y),
+        String(m).padStart(2, '0'),
+        String(day).padStart(2, '0'))
+      if (!seen.has(dir)) seen.add(dir)
+    }
   }
+  return Array.from(seen)
 }
 
 /** Read the first line of a rollout file to extract cwd from session_meta. */
@@ -226,6 +236,23 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
 
   private attachSession(filePath: string, stat: fs.Stats): void {
     const sessionId = this.sessionIdFor(filePath)
+    const label = `Codex ${sessionId.slice(0, SESSION_ID_DISPLAY)}`
+
+    // Build the parser once per session so the delegate closures capture the
+    // right session reference and re-emission is stateless on this side.
+    const parser = new CodexRolloutParser({
+      emit: (event) => this._onEvent.fire({ ...event, sessionId }),
+      elapsed: () => {
+        const s = this.sessions.get(sessionId)
+        return s ? (Date.now() - s.sessionStartTime) / 1000 : 0
+      },
+      setLabel: (newLabel) => {
+        const s = this.sessions.get(sessionId)
+        if (!s || !s.label.startsWith('Codex ')) return // only replace auto-label
+        s.label = newLabel
+        this._onSessionLifecycle.fire({ type: 'updated', sessionId, label: newLabel })
+      },
+    })
 
     const session: WatchedCodexSession = {
       sessionId,
@@ -238,10 +265,9 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
       lastActivityTime: stat.mtimeMs,
       sessionDetected: false,
       sessionCompleted: false,
-      label: `Codex ${sessionId.slice(0, SESSION_ID_DISPLAY)}`,
-      model: null,
-      cwd: null,
+      label,
       rolloutState: createCodexRolloutState(),
+      parser,
     }
     this.sessions.set(sessionId, session)
 
@@ -250,7 +276,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
 
     session.sessionDetected = true
     this._onSessionDetected.fire(sessionId)
-    this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+    this._onSessionLifecycle.fire({ type: 'started', sessionId, label })
 
     try {
       session.fileWatcher = fs.watch(filePath, () => this.readNewLines(sessionId))
@@ -272,25 +298,18 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     session.fileSize = result.newSize
     session.lastActivityTime = Date.now()
 
-    const parser = new CodexRolloutParser({
-      emit: (event) => this._onEvent.fire({ ...event, sessionId }),
-      elapsed: () => (Date.now() - session.sessionStartTime) / 1000,
-      setLabel: (label) => {
-        if (session.label.startsWith('Codex ')) { // only replace auto-label
-          session.label = label
-          this._onSessionLifecycle.fire({ type: 'updated', sessionId, label })
-        }
-      },
-    })
-
-    for (const line of result.lines) {
-      try { parser.processLine(line, session.rolloutState) }
-      catch (err) { log.debug('Parser threw on line:', err) }
+    // Re-activate if the session had been marked complete on inactivity —
+    // new content means the user resumed the Codex CLI.
+    if (session.sessionCompleted) {
+      session.sessionCompleted = false
+      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+      log.info(`Session ${sessionId.slice(0, SESSION_ID_DISPLAY)} re-activated after idle`)
     }
 
-    // Pull updated model/cwd out of state
-    session.model = session.rolloutState.model
-    session.cwd = session.rolloutState.cwd
+    for (const line of result.lines) {
+      try { session.parser.processLine(line, session.rolloutState) }
+      catch (err) { log.debug('Parser threw on line:', err) }
+    }
 
     this.resetInactivityTimer(sessionId)
   }
