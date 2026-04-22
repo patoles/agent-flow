@@ -59,19 +59,25 @@ export interface WatchPanelWiringOptions {
  * Wire a watcher's event/lifecycle streams to the current visualizer panel.
  * This is the boilerplate every runtime needs: forward events, broadcast
  * session list changes, and reflect session detection in the status bar.
+ *
+ * Returns a disposable that unhooks all three listeners — callers wiring the
+ * watcher multiple times (e.g. re-wiring on panel reopen) should dispose the
+ * previous wiring to avoid accumulating listeners.
  */
 export function wireWatcherToPanel(
   watcher: AgentSessionWatcher,
   options: WatchPanelWiringOptions,
-): void {
-  watcher.onEvent((event) => {
+): TypedDisposable {
+  const subs: TypedDisposable[] = []
+
+  subs.push(watcher.onEvent((event) => {
     const panel = VisualizerPanel.getCurrent()
     if (!panel || !panel.isReady) return
     const transformed = options.transformEvent ? options.transformEvent(event) : event
     if (transformed) panel.sendEvent(transformed)
-  })
+  }))
 
-  watcher.onSessionDetected((sessionId) => {
+  subs.push(watcher.onSessionDetected((sessionId) => {
     const panel = VisualizerPanel.getCurrent()
     if (panel) {
       const sessionCount = watcher.getActiveSessions().length
@@ -83,9 +89,9 @@ export function wireWatcherToPanel(
       `Agent Visualizer: watching ${options.sessionLabelPrefix} session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`,
       STATUS_MESSAGE_DURATION_MS,
     )
-  })
+  }))
 
-  watcher.onSessionLifecycle((lifecycle) => {
+  subs.push(watcher.onSessionLifecycle((lifecycle) => {
     const panel = VisualizerPanel.getCurrent()
     if (!panel) return
     if (lifecycle.type === 'started') {
@@ -104,5 +110,7 @@ export function wireWatcherToPanel(
     } else {
       panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
     }
-  })
+  }))
+
+  return { dispose: () => { for (const s of subs) s.dispose() } }
 }

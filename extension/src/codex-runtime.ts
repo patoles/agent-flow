@@ -20,7 +20,7 @@ export function startCodexRuntime(context: vscode.ExtensionContext): AgentRuntim
   const watcher = new CodexSessionWatcher(workspace)
   context.subscriptions.push(watcher)
 
-  wireWatcherToPanel(watcher, {
+  const wiring = wireWatcherToPanel(watcher, {
     sessionLabelPrefix: 'Codex',
   })
 
@@ -32,7 +32,7 @@ export function startCodexRuntime(context: vscode.ExtensionContext): AgentRuntim
 
   const connectionStatus = (): string => `Codex session watcher (${homeLabel})`
 
-  const dispose = (): void => watcher.dispose()
+  const dispose = (): void => { wiring.dispose(); watcher.dispose() }
 
   log.info(`Codex runtime started (home: ${homeLabel})`)
 

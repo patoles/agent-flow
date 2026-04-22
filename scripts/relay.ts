@@ -324,9 +324,21 @@ export interface Relay {
   dispose: () => void
 }
 
+export type RelayRuntimeMode = 'claude' | 'codex' | 'auto'
+
 export interface RelayOptions {
   workspace: string
   verbose?: boolean
+  /** Which runtimes to watch. Defaults to AGENT_FLOW_RUNTIME env var, or 'auto'.
+   *  Mirrors the extension's `agentVisualizer.runtime` setting so users of the
+   *  dev relay and `npx agent-flow-app` have a way to opt out of one runtime. */
+  runtime?: RelayRuntimeMode
+}
+
+function resolveRuntimeMode(explicit?: RelayRuntimeMode): RelayRuntimeMode {
+  if (explicit === 'claude' || explicit === 'codex' || explicit === 'auto') return explicit
+  const raw = process.env.AGENT_FLOW_RUNTIME
+  return raw === 'claude' || raw === 'codex' ? raw : 'auto'
 }
 
 export async function createRelay(options: RelayOptions): Promise<Relay> {
@@ -338,31 +350,41 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   }
   relayCreated = true
 
-  const hookServer = new HookServer()
-  const hookPort = await hookServer.start()
-  if (hookPort === HOOK_SERVER_NOT_STARTED) {
-    throw new Error('Failed to start hook server (port in use)')
-  }
+  const mode = resolveRuntimeMode(options.runtime)
+  const wantClaude = mode === 'claude' || mode === 'auto'
+  const wantCodex = mode === 'codex' || mode === 'auto'
+  log(`[relay] Runtime mode: ${mode} (watching: ${[wantClaude && 'claude', wantCodex && 'codex'].filter(Boolean).join(', ')})`)
 
-  hookServer.onEvent((event: AgentEvent) => {
-    broadcast(JSON.stringify({ type: 'agent-event', event }))
-  })
-
-  writeDiscoveryFile(hookPort, workspace)
-
-  scanForActiveSessions(workspace)
-  const scanInterval = setInterval(() => scanForActiveSessions(workspace), SCAN_INTERVAL_MS)
-
-  const resolved = (() => { try { return fs.realpathSync(workspace) } catch { return workspace } })()
-  const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
-  const projectDir = path.join(CLAUDE_DIR, encoded)
+  let hookServer: HookServer | null = null
+  let scanInterval: NodeJS.Timeout | null = null
   let projectDirWatcher: fs.FSWatcher | null = null
-  if (fs.existsSync(projectDir)) {
-    try {
-      projectDirWatcher = fs.watch(projectDir, (_eventType, filename) => {
-        if (filename?.endsWith('.jsonl')) scanForActiveSessions(workspace)
-      })
-    } catch {}
+
+  if (wantClaude) {
+    hookServer = new HookServer()
+    const hookPort = await hookServer.start()
+    if (hookPort === HOOK_SERVER_NOT_STARTED) {
+      throw new Error('Failed to start hook server (port in use)')
+    }
+
+    hookServer.onEvent((event: AgentEvent) => {
+      broadcast(JSON.stringify({ type: 'agent-event', event }))
+    })
+
+    writeDiscoveryFile(hookPort, workspace)
+
+    scanForActiveSessions(workspace)
+    scanInterval = setInterval(() => scanForActiveSessions(workspace), SCAN_INTERVAL_MS)
+
+    const resolved = (() => { try { return fs.realpathSync(workspace) } catch { return workspace } })()
+    const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
+    const projectDir = path.join(CLAUDE_DIR, encoded)
+    if (fs.existsSync(projectDir)) {
+      try {
+        projectDirWatcher = fs.watch(projectDir, (_eventType, filename) => {
+          if (filename?.endsWith('.jsonl')) scanForActiveSessions(workspace)
+        })
+      } catch {}
+    }
   }
 
   // ─── Codex runtime ────────────────────────────────────────────────────────
@@ -371,12 +393,15 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   // We don't subscribe to onSessionDetected — it fires together with the
   // lifecycle 'started' event in CodexSessionWatcher.attachSession, so
   // wiring both would double-broadcast session-started to SSE clients.
-  const codexWatcher = new CodexSessionWatcher(workspace)
-  codexWatcher.onEvent((event) => broadcastEvent(event))
-  codexWatcher.onSessionLifecycle((lifecycle) => {
-    broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label)
-  })
-  codexWatcher.start()
+  let codexWatcher: CodexSessionWatcher | null = null
+  if (wantCodex) {
+    codexWatcher = new CodexSessionWatcher(workspace)
+    codexWatcher.onEvent((event) => broadcastEvent(event))
+    codexWatcher.onSessionLifecycle((lifecycle) => {
+      broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label)
+    })
+    codexWatcher.start()
+  }
 
   return {
     handleSSE(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -404,7 +429,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
           startTime: session.sessionStartTime, lastActivityTime: session.lastActivityTime,
         })
       }
-      sessionList.push(...codexWatcher.getActiveSessions())
+      if (codexWatcher) sessionList.push(...codexWatcher.getActiveSessions())
       if (sessionList.length > 0) {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }
@@ -425,16 +450,18 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     },
 
     dispose() {
-      removeDiscoveryFile()
-      hookServer.dispose()
-      clearInterval(scanInterval)
-      projectDirWatcher?.close()
-      for (const session of sessions.values()) {
-        session.fileWatcher?.close()
-        if (session.pollTimer) clearInterval(session.pollTimer)
-        if (session.inactivityTimer) clearTimeout(session.inactivityTimer)
+      if (wantClaude) {
+        removeDiscoveryFile()
+        hookServer?.dispose()
+        if (scanInterval) clearInterval(scanInterval)
+        projectDirWatcher?.close()
+        for (const session of sessions.values()) {
+          session.fileWatcher?.close()
+          if (session.pollTimer) clearInterval(session.pollTimer)
+          if (session.inactivityTimer) clearTimeout(session.inactivityTimer)
+        }
       }
-      codexWatcher.dispose()
+      codexWatcher?.dispose()
     },
   }
 }

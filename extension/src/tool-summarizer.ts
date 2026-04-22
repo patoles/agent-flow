@@ -1,6 +1,13 @@
 /**
- * Shared tool summarization utilities.
+ * Shared tool summarization utilities for Claude Code tools.
  * Extracts duplicated logic from session-watcher.ts and hook-server.ts.
+ *
+ * Claude-only by convention: Codex tool summaries are produced inline in
+ * codex-rollout-parser.ts because Codex's function_call shape and tool names
+ * (exec_command, apply_patch, update_plan, write_stdin, web_search_call, …)
+ * don't overlap with Claude's. If a future refactor unifies them, this
+ * module would become the natural home — but until then, don't add Codex
+ * cases here without a plan for dispatching by runtime.
  */
 
 import {

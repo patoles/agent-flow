@@ -556,7 +556,7 @@ export class CodexRolloutParser {
       )
     }
 
-    this.emitContextUpdate(state)
+    this.emitContextUpdate(state, { authoritative: true })
   }
 
   private handleAgentReasoning(payload: Record<string, unknown>, state: CodexRolloutState): void {
@@ -607,11 +607,18 @@ export class CodexRolloutParser {
 
   // ─── Shared helpers ──────────────────────────────────────────────────────
 
-  private emitContextUpdate(state: CodexRolloutState): void {
+  private emitContextUpdate(
+    state: CodexRolloutState,
+    opts: { authoritative?: boolean } = {},
+  ): void {
     const bd = state.contextBreakdown
     const estimated = bd.systemPrompt + bd.userMessages + bd.toolResults + bd.reasoning + bd.subagentResults
     // Prefer the authoritative total from event_msg.token_count when available.
     const tokens = state.lastReportedTokens ?? estimated
+    // Flag events where Codex just reported token_count so the UI can smooth
+    // the estimate→authoritative transition instead of jumping. Non-authoritative
+    // updates still ride on lastReportedTokens once it's been set, but the
+    // breakdown itself is our estimate until the next token_count arrives.
     this.delegate.emit({
       time: this.delegate.elapsed(),
       type: 'context_update',
@@ -620,6 +627,7 @@ export class CodexRolloutParser {
         tokens,
         breakdown: { ...bd },
         ...(state.reportedContextWindow ? { tokensMax: state.reportedContextWindow } : {}),
+        ...(opts.authoritative ? { isAuthoritative: true } : {}),
       },
     })
   }

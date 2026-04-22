@@ -120,7 +120,7 @@ export async function startClaudeRuntime(
   }
 
   // Route watcher events + lifecycle → panel (with orchestrator completion filter)
-  wireWatcherToPanel(watcher, {
+  const wiring = wireWatcherToPanel(watcher, {
     sessionLabelPrefix: 'Claude',
     transformEvent: filterOrchestratorCompletion,
   })
@@ -139,6 +139,7 @@ export async function startClaudeRuntime(
     // gracefully via PID checks. This avoids breaking multi-window setups and
     // means hooks survive VS Code restarts without reconfiguration.
     if (workspace) { removeDiscoveryFile(workspace) }
+    wiring.dispose()
     hookServer.dispose()
     watcher.dispose()
   }

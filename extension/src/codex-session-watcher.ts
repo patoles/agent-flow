@@ -87,17 +87,27 @@ function recentSessionDirs(now: Date): string[] {
   return Array.from(seen)
 }
 
-/** Read the first line of a rollout file to extract cwd from session_meta. */
+/** Read the first line of a rollout file to extract cwd from session_meta.
+ *
+ *  UTF-8 safety: `\n` is 0x0a, which never appears as a continuation byte in
+ *  a multi-byte UTF-8 sequence (continuation bytes are 0x80–0xBF), so slicing
+ *  at the byte-indexed newline is guaranteed to land on a character boundary.
+ *  If no newline is found in the first 64KB (pathological session_meta), we
+ *  fall back to the full read — JSON.parse will fail on the truncated object
+ *  and we'll return null rather than emit a corrupted cwd. */
 function readSessionCwd(filePath: string): string | null {
   try {
     const fd = fs.openSync(filePath, 'r')
     try {
-      // First line is session_meta; it's typically well under 4KB, but base_instructions
-      // can push it larger. Read a generous chunk.
+      // First line is session_meta; it's typically well under 4KB, but
+      // base_instructions can push it larger. Read a generous chunk.
       const buf = Buffer.alloc(65536)
       const read = fs.readSync(fd, buf, 0, buf.length, 0)
-      const firstNewline = buf.indexOf(0x0a, 0)
-      const line = buf.slice(0, firstNewline > 0 ? firstNewline : read).toString('utf-8')
+      // indexOf bounded to the filled portion — unwritten bytes are zero and
+      // would never match 0x0a, but an explicit end offset makes this obvious.
+      const firstNewline = buf.subarray(0, read).indexOf(0x0a)
+      const end = firstNewline >= 0 ? firstNewline : read
+      const line = buf.slice(0, end).toString('utf-8')
       const parsed = JSON.parse(line) as { type?: string; payload?: { cwd?: string } }
       if (parsed.type !== 'session_meta') return null
       return typeof parsed.payload?.cwd === 'string' ? parsed.payload.cwd : null
