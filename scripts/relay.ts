@@ -368,6 +368,9 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   // ─── Codex runtime ────────────────────────────────────────────────────────
   // Watch Codex rollouts in parallel. No-op if ~/.codex/sessions doesn't
   // exist or no sessions match the current workspace.
+  // We don't subscribe to onSessionDetected — it fires together with the
+  // lifecycle 'started' event in CodexSessionWatcher.attachSession, so
+  // wiring both would double-broadcast session-started to SSE clients.
   const codexWatcher = new CodexSessionWatcher(workspace)
   codexWatcher.onEvent((event) => broadcastEvent(event))
   codexWatcher.onSessionLifecycle((lifecycle) => {

@@ -125,9 +125,10 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
   readonly onSessionDetected = this._onSessionDetected.event
   readonly onSessionLifecycle = this._onSessionLifecycle.event
 
-  /** Optional workspace override for non-VS Code hosts (relay, CLI).
-   *  If provided, takes precedence over any runtime workspace lookup. */
-  constructor(private readonly workspaceOverride?: string | null) {}
+  /** Workspace path used as a cwd filter — Codex sessions are attached only if
+   *  their session_meta.cwd matches this path (or is under it). Pass null/undefined
+   *  to attach to any Codex session (useful when no workspace is open). */
+  constructor(private readonly workspace?: string | null) {}
 
   isActive(): boolean {
     for (const s of this.sessions.values()) {
@@ -160,9 +161,9 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
   }
 
   start(): void {
-    if (this.workspaceOverride) {
-      try { this.workspacePath = fs.realpathSync(this.workspaceOverride) }
-      catch { this.workspacePath = this.workspaceOverride }
+    if (this.workspace) {
+      try { this.workspacePath = fs.realpathSync(this.workspace) }
+      catch { this.workspacePath = this.workspace }
     }
 
     this.scanForSessions()
