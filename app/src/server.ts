@@ -3,9 +3,12 @@
  * Reuses the extension's hook server, transcript parser, and session watcher.
  */
 import * as http from 'http'
+import * as os from 'os'
+import * as path from 'path'
 import { exec, execFile } from 'child_process'
 
 import { createRelay } from '../../scripts/relay'
+import { createTelemetryClient } from '../../scripts/telemetry'
 import { serveStatic } from './static'
 
 interface ServerOptions {
@@ -18,7 +21,14 @@ interface ServerOptions {
 export async function startServer(options: ServerOptions) {
   const { port, openBrowser, workspace } = options
 
-  const relay = await createRelay({ workspace, verbose: options.verbose })
+  const configDir = path.join(os.homedir(), '.agent-flow')
+  const telemetry = createTelemetryClient({
+    logDir: path.join(configDir, 'telemetry'),
+    installIdPath: path.join(configDir, 'installation-id'),
+  })
+  await telemetry.init()
+
+  const relay = await createRelay({ workspace, verbose: options.verbose, telemetry })
 
   const server = http.createServer((req, res) => {
     // SSE endpoint
@@ -45,11 +55,16 @@ export async function startServer(options: ServerOptions) {
     }
   })
 
-  // Cleanup on exit
+  // Cleanup on exit. Idempotent — repeat signals (Ctrl+C spam, SIGTERM+SIGHUP,
+  // etc.) would otherwise emit duplicate session_end events and race the
+  // telemetry sync loop against itself.
+  let shuttingDown = false
   function cleanup() {
+    if (shuttingDown) return
+    shuttingDown = true
     server.close()
     relay.dispose()
-    process.exit(0)
+    void telemetry.dispose().finally(() => process.exit(0))
   }
   process.on('SIGINT', cleanup)
   process.on('SIGTERM', cleanup)

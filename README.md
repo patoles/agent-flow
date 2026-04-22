@@ -136,6 +136,15 @@ Other scripts:
 
 Created by [Simon Patole](https://github.com/patoles), for [CraftMyGame](https://craftmygame.com).
 
+## Privacy & Telemetry
+
+Agent Flow ships **opt-out** anonymous usage telemetry. On by default. Only
+aggregate events (session count, duration, OS, version, models observed,
+runtimes watched, error class) — never prompts, file paths, or code.
+
+- Turn off: `export AGENT_FLOW_TELEMETRY=false` or `export DO_NOT_TRACK=1`
+- Inspect the payload: `cat ~/.agent-flow/telemetry/events.jsonl`
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE) for details.

@@ -12,6 +12,7 @@ const path = require('path')
 
 const ROOT = path.join(__dirname, '..')
 const APP_DIR = __dirname
+const APP_PKG = require(path.join(APP_DIR, 'package.json'))
 
 console.log('Building Agent Flow app...\n')
 
@@ -32,6 +33,9 @@ esbuild.buildSync({
   outfile: path.join(APP_DIR, 'dist', 'app.js'),
   alias: {
     'vscode': path.join(ROOT, 'scripts', 'vscode-shim.js'),
+  },
+  define: {
+    AGENT_FLOW_APP_VERSION: JSON.stringify(APP_PKG.version),
   },
   banner: {
     js: '#!/usr/bin/env node',
