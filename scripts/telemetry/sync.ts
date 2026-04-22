@@ -73,6 +73,13 @@ export async function syncOnce(opts: SyncOptions): Promise<SyncResult> {
 
   if (!body.inserted || body.inserted <= 0) return { sent: 0, reason: 'nothing_inserted' }
 
+  // Advance by the full batch length, not body.inserted. This assumes the
+  // ingest edge function is all-or-nothing (either accepts the whole batch or
+  // rejects individual events against its schema and silently drops them).
+  // If the server ever moves to partial-insertion-with-rejection-offsets, this
+  // needs to change to advance by body.inserted or a returned offset list —
+  // otherwise events rejected in the middle of a batch would be re-sent on the
+  // next run, since cursor doesn't know which ones were dropped.
   const newCursor = cursor + batch.length
   fs.writeFileSync(opts.cursorPath, String(newCursor))
   return { sent: batch.length }

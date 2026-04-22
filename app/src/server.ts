@@ -68,6 +68,10 @@ export async function startServer(options: ServerOptions) {
   }
   process.on('SIGINT', cleanup)
   process.on('SIGTERM', cleanup)
+  // SIGHUP fires when the controlling terminal closes (SSH session drops, tmux
+  // pane killed). Without a handler, Node's default behavior is to terminate
+  // without running cleanup — so session_end never flushes.
+  process.on('SIGHUP', cleanup)
 }
 
 function openURL(url: string) {
