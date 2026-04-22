@@ -1,159 +1,33 @@
 import * as vscode from 'vscode'
 import { VisualizerPanel } from './webview-provider'
 import { JsonlEventSource } from './event-source'
-import { HookServer } from './hook-server'
-import { SessionWatcher } from './session-watcher'
-import { AgentEvent, WebviewToExtensionMessage } from './protocol'
-import {
-  ORCHESTRATOR_NAME, HOOK_SERVER_NOT_STARTED,
-  SESSION_ID_DISPLAY, STATUS_MESSAGE_DURATION_MS,
-} from './constants'
-import {
-  promptHookSetupIfNeeded,
-  configureClaudeHooks, migrateHttpHooks,
-  isDisable1MContext,
-} from './hooks-config'
-import {
-  writeDiscoveryFile, removeDiscoveryFile,
-  ensureHookScript,
-} from './discovery'
+import { WebviewToExtensionMessage } from './protocol'
+import { startClaudeRuntime } from './claude-runtime'
+import { promptHookSetupIfNeeded, configureClaudeHooks, isDisable1MContext } from './hooks-config'
 import { createLogger } from './logger'
+import type { AgentRuntime, AgentRuntimeMode } from './session-runtime'
 
 const log = createLogger('Extension')
 
-/** Convert orchestrator agent_complete to agent_idle unless it's a session end.
- *  Prevents premature "completed" state during long API calls. */
-function filterOrchestratorCompletion(event: AgentEvent): AgentEvent | null {
-  if (event.type !== 'agent_complete') return event
-  const agentName = event.payload?.agent ?? event.payload?.name
-  const isOrchestrator = agentName === ORCHESTRATOR_NAME || !agentName
-  if (!isOrchestrator) return event
-  if (event.payload?.sessionEnd) return event
-  return { ...event, type: 'agent_idle' }
-}
-
 let eventSource: JsonlEventSource | undefined
-let hookServer: HookServer | undefined
-let sessionWatcher: SessionWatcher | undefined
+let runtime: AgentRuntime | undefined
+
+async function startRuntime(
+  mode: AgentRuntimeMode,
+  context: vscode.ExtensionContext,
+): Promise<AgentRuntime> {
+  switch (mode) {
+    case 'claude':
+      return startClaudeRuntime(context)
+    case 'codex':
+      throw new Error('Codex runtime not yet implemented')
+  }
+}
 
 export async function activate(context: vscode.ExtensionContext) {
   log.info('Extension activated')
 
-  // ─── Start the hook server ──────────────────────────────────────────────
-
-  hookServer = new HookServer()
-  context.subscriptions.push(hookServer)
-
-  let hookPort: number
-  try {
-    hookPort = await hookServer.start()
-  } catch (err) {
-    log.error('Failed to start hook server:', err)
-    hookPort = HOOK_SERVER_NOT_STARTED
-  }
-
-  if (hookPort === HOOK_SERVER_NOT_STARTED) {
-    log.info('Hook server skipped (another instance owns the port) — using session watcher only')
-  } else {
-    log.info(`Hook server running on port ${hookPort}`)
-
-    // Write discovery file so the hook script can find us.
-    // The hook script reads this at invocation time — no port in settings.json.
-    const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-    if (workspace) {
-      ensureHookScript()
-      writeDiscoveryFile(hookPort, workspace)
-      migrateHttpHooks()
-    }
-
-    // Wire hook events to the webview — but only when session watcher isn't active
-    // for that specific session (session watcher reads JSONL transcripts directly)
-    hookServer.onEvent((event) => {
-      const panel = VisualizerPanel.getCurrent()
-      if (!panel || !panel.isReady) { return }
-
-      const eventSessionId = event.sessionId
-      const sessionWatcherHandlesThis = eventSessionId
-        ? sessionWatcher?.isSessionActive(eventSessionId)
-        : sessionWatcher?.isActive()
-
-      if (sessionWatcherHandlesThis) {
-        // Session watcher handles the orchestrator's transcript directly.
-        // Let all non-orchestrator (subagent) events through from the Hook Server,
-        // EXCEPT lifecycle events (spawn/complete) which the session watcher
-        // handles with more accurate names from the transcript/meta files.
-        const agentName = event.payload?.agent ?? event.payload?.name
-        const isOrchestrator = agentName === ORCHESTRATOR_NAME || !agentName
-
-        if (isOrchestrator) {
-          const filtered = filterOrchestratorCompletion(event)
-          if (filtered) panel.sendEvent(filtered)
-          return
-        }
-
-        // Filter subagent lifecycle events — the session watcher (transcript
-        // parser + file watcher) handles these with correct names. Letting
-        // them through from hooks would create duplicate nodes with different
-        // names (hook uses agent_type-id, transcript uses description).
-        const SUBAGENT_LIFECYCLE_EVENTS = ['agent_spawn', 'subagent_dispatch', 'subagent_return', 'agent_complete']
-        if (SUBAGENT_LIFECYCLE_EVENTS.includes(event.type)) return
-
-        // Subagent tool/message events — pass through from Hook Server
-        panel.sendEvent(event)
-        return
-      }
-      panel.sendEvent(event)
-      panel.setConnectionStatus('watching', `Claude Code hooks (:${hookPort})`)
-    })
-  }
-
-  // ─── Start the session watcher (auto-detects active Claude Code sessions) ─
-
-  sessionWatcher = new SessionWatcher()
-  context.subscriptions.push(sessionWatcher)
-
-  sessionWatcher.onEvent((event) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (!panel || !panel.isReady) { return }
-
-    const filtered = filterOrchestratorCompletion(event)
-    if (filtered) panel.sendEvent(filtered)
-  })
-
-  sessionWatcher.onSessionDetected((sessionId) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (panel) {
-      const sessionCount = sessionWatcher?.getActiveSessions().length ?? 0
-      panel.setConnectionStatus('watching', sessionCount > 1
-        ? `${sessionCount} sessions`
-        : `Session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`)
-    }
-    vscode.window.setStatusBarMessage(`Agent Visualizer: watching session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`, STATUS_MESSAGE_DURATION_MS)
-
-  })
-
-  sessionWatcher.onSessionLifecycle((lifecycle) => {
-    const panel = VisualizerPanel.getCurrent()
-    if (!panel) { return }
-    if (lifecycle.type === 'started') {
-      panel.postMessage({
-        type: 'session-started',
-        session: {
-          id: lifecycle.sessionId,
-          label: lifecycle.label,
-          status: 'active' as const,
-          startTime: Date.now(),
-          lastActivityTime: Date.now(),
-        },
-      })
-    } else if (lifecycle.type === 'updated') {
-      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label })
-    } else {
-      panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
-    }
-  })
-
-  sessionWatcher.start()
+  runtime = await startRuntime('claude', context)
 
   // ─── Commands ──────────────────────────────────────────────────────────────
 
@@ -247,20 +121,16 @@ function wirePanel(panel: VisualizerPanel): void {
           panel.postMessage({ type: 'config', config: { disable1MContext: true } })
         }
         // Report current connection status and replay active sessions
-        if (sessionWatcher) {
+        if (runtime) {
           // Send session list FIRST so the webview selects a session
           // before replay events arrive (otherwise they have no selected
           // session to match and are only buffered, not delivered).
-          const sessions = sessionWatcher.getActiveSessions()
+          const sessions = runtime.watcher.getActiveSessions()
           if (sessions.length > 0) {
             panel.postMessage({ type: 'session-list', sessions })
-            sessionWatcher.replaySessionStart(sessions.map(s => s.id))
+            runtime.watcher.replaySessionStart(sessions.map(s => s.id))
           }
-        }
-        if (hookServer && hookServer.getPort() > 0) {
-          panel.setConnectionStatus('watching', `Hooks :${hookServer.getPort()} + session watcher`)
-        } else {
-          panel.setConnectionStatus('watching', 'Session watcher')
+          panel.setConnectionStatus('watching', runtime.connectionStatus())
         }
         break
 
@@ -343,24 +213,8 @@ async function handleOpenFile(filePath: string, line?: number): Promise<void> {
 
 export function deactivate(): void {
   disconnectEventSource()
-
-  // Remove our discovery file so the hook script won't forward to a dead port.
-  // Hook entries in settings.json are left intact — the command is stable
-  // (node ~/.claude/agent-flow/hook.js) and the script handles dead instances
-  // gracefully via PID checks. This avoids breaking multi-window setups and
-  // means hooks survive VS Code restarts without reconfiguration.
-  const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-  if (workspace) {
-    removeDiscoveryFile(workspace)
-  }
-
-  if (hookServer) {
-    hookServer.dispose()
-    hookServer = undefined
-  }
-  if (sessionWatcher) {
-    sessionWatcher.dispose()
-    sessionWatcher = undefined
+  if (runtime) {
+    runtime.dispose()
+    runtime = undefined
   }
 }
-
