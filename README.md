@@ -57,9 +57,15 @@ Open http://localhost:3000 and start a Claude Code session in another terminal �
 
 1. Install the extension
 2. Open the Command Palette (`Cmd+Shift+P`) and run **Agent Flow: Open Agent Flow**
-3. Start a Claude Code session in your workspace — Agent Flow will auto-detect it
+3. Start a Claude Code or Codex session in your workspace — Agent Flow will auto-detect it
 
 Agent Flow automatically configures Claude Code hooks the first time you open the panel. To manually reconfigure, run **Agent Flow: Configure Claude Code Hooks** from the Command Palette.
+
+### Runtime selection
+
+By default Agent Flow watches both Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`) concurrently. Sessions are shown side-by-side and tagged by runtime. If you only use one, the other is a harmless no-op — no visible effect, no user action needed.
+
+To restrict to a single runtime, set `agentVisualizer.runtime` to `"claude"` or `"codex"` in your settings. For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
 ### JSONL Event Log
 
