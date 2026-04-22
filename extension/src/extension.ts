@@ -20,28 +20,28 @@ function readConfiguredMode(): ConfiguredRuntimeMode {
   return raw === 'claude' || raw === 'codex' ? raw : 'auto'
 }
 
+interface StartRuntimesResult {
+  runtimes: AgentRuntime[]
+  failures: AgentRuntimeMode[]
+}
+
 async function startRuntimes(
   mode: ConfiguredRuntimeMode,
   context: vscode.ExtensionContext,
-): Promise<AgentRuntime[]> {
-  const result: AgentRuntime[] = []
-  try {
-    if (mode === 'claude' || mode === 'auto') {
-      log.info('Starting Claude runtime...')
-      result.push(await startClaudeRuntime(context))
-    }
-  } catch (err) {
-    log.error('Claude runtime failed to start:', err)
+): Promise<StartRuntimesResult> {
+  const runtimes: AgentRuntime[] = []
+  const failures: AgentRuntimeMode[] = []
+  if (mode === 'claude' || mode === 'auto') {
+    log.info('Starting Claude runtime...')
+    try { runtimes.push(await startClaudeRuntime(context)) }
+    catch (err) { log.error('Claude runtime failed to start:', err); failures.push('claude') }
   }
-  try {
-    if (mode === 'codex' || mode === 'auto') {
-      log.info('Starting Codex runtime...')
-      result.push(startCodexRuntime(context))
-    }
-  } catch (err) {
-    log.error('Codex runtime failed to start:', err)
+  if (mode === 'codex' || mode === 'auto') {
+    log.info('Starting Codex runtime...')
+    try { runtimes.push(startCodexRuntime(context)) }
+    catch (err) { log.error('Codex runtime failed to start:', err); failures.push('codex') }
   }
-  return result
+  return { runtimes, failures }
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -49,8 +49,19 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const mode = readConfiguredMode()
   log.info(`Runtime mode: ${mode}`)
-  runtimes = await startRuntimes(mode, context)
+  const { runtimes: started, failures } = await startRuntimes(mode, context)
+  runtimes = started
   log.info(`Active runtimes: ${runtimes.map(r => r.mode).join(', ') || 'none'}`)
+
+  // Surface startup failures to the user — the log-only path leaves them
+  // staring at a "disconnected" visualizer with no explanation.
+  if (runtimes.length === 0 && failures.length > 0) {
+    vscode.window.showWarningMessage(
+      `Agent Visualizer: ${failures.join(' and ')} runtime${failures.length > 1 ? 's' : ''} failed to start. See the Output panel for details.`,
+    )
+  } else if (failures.length > 0) {
+    log.info(`Partial startup — ${failures.join(', ')} failed but ${runtimes.map(r => r.mode).join(', ')} active`)
+  }
 
   // ─── Commands ──────────────────────────────────────────────────────────────
 

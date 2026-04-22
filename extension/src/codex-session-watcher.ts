@@ -44,6 +44,9 @@ interface WatchedCodexSession {
   pollTimer: NodeJS.Timeout | null
   inactivityTimer: NodeJS.Timeout | null
   fileSize: number
+  /** Leftover bytes past the last newline from the previous read — prepended
+   *  to the next chunk so a JSONL line split across reads gets reassembled. */
+  fileTail: string
   sessionStartTime: number
   lastActivityTime: number
   sessionDetected: boolean
@@ -258,6 +261,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
       pollTimer: null,
       inactivityTimer: null,
       fileSize: 0,
+      fileTail: '',
       sessionStartTime: stat.birthtimeMs || stat.mtimeMs,
       lastActivityTime: stat.mtimeMs,
       sessionDetected: false,
@@ -290,9 +294,10 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
-    const result = readNewFileLines(session.filePath, session.fileSize)
+    const result = readNewFileLines(session.filePath, session.fileSize, session.fileTail)
     if (!result) return
     session.fileSize = result.newSize
+    session.fileTail = result.tail
     session.lastActivityTime = Date.now()
 
     // Re-activate if the session had been marked complete on inactivity —
