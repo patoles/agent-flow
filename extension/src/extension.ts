@@ -24,16 +24,24 @@ async function startRuntimes(
   mode: ConfiguredRuntimeMode,
   context: vscode.ExtensionContext,
 ): Promise<AgentRuntime[]> {
-  switch (mode) {
-    case 'claude':
-      return [await startClaudeRuntime(context)]
-    case 'codex':
-      return [startCodexRuntime(context)]
-    case 'auto':
-      // Auto mode: run both. Each watches its own session source; the webview
-      // already multiplexes sessions by sessionId, so they coexist cleanly.
-      return [await startClaudeRuntime(context), startCodexRuntime(context)]
+  const result: AgentRuntime[] = []
+  try {
+    if (mode === 'claude' || mode === 'auto') {
+      log.info('Starting Claude runtime...')
+      result.push(await startClaudeRuntime(context))
+    }
+  } catch (err) {
+    log.error('Claude runtime failed to start:', err)
   }
+  try {
+    if (mode === 'codex' || mode === 'auto') {
+      log.info('Starting Codex runtime...')
+      result.push(startCodexRuntime(context))
+    }
+  } catch (err) {
+    log.error('Codex runtime failed to start:', err)
+  }
+  return result
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -42,6 +50,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const mode = readConfiguredMode()
   log.info(`Runtime mode: ${mode}`)
   runtimes = await startRuntimes(mode, context)
+  log.info(`Active runtimes: ${runtimes.map(r => r.mode).join(', ') || 'none'}`)
 
   // ─── Commands ──────────────────────────────────────────────────────────────
 
