@@ -20,12 +20,15 @@ export const POLL_FALLBACK_MS = 3000
  *  Must be long enough that normal tool execution won't trigger it. */
 export const PERMISSION_DETECT_MS = 5000
 
-/** JSONL files modified within this many seconds are considered active.
- *  Must be longer than INACTIVITY_TIMEOUT_MS to avoid dropping sessions
- *  during long thinking pauses. Generous by design — a user with an
- *  open Claude Code or Codex CLI that's been idle across a break should
- *  still see their session picked up when they open the visualizer. */
-export const ACTIVE_SESSION_AGE_S = 4 * 60 * 60 // 4 hours
+/** JSONL files modified within this many seconds are considered active
+ *  at discovery time. Must be longer than INACTIVITY_TIMEOUT_MS to avoid
+ *  dropping sessions during long thinking pauses.
+ *
+ *  Filter is discovery-time only — stale sessions that receive new writes
+ *  refresh their mtime and are picked up by the next scan tick
+ *  (SCAN_INTERVAL_MS). A user resuming a long-idle session should see it
+ *  attach within ~1s of their next message. */
+export const ACTIVE_SESSION_AGE_S = 10 * 60 // 10 minutes
 
 /** Duration of VS Code status bar messages (ms) */
 export const STATUS_MESSAGE_DURATION_MS = 5000
