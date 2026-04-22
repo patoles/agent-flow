@@ -189,7 +189,11 @@ export function resolveSubagentChildName(input: Record<string, unknown>): string
   return String(input.description || input.subagent_type || 'subagent').slice(0, CHILD_NAME_MAX)
 }
 
-/** Prefixes that identify system-injected content (not real user messages) */
+/** Prefixes that identify system-injected content (not real user messages)
+ *  for Claude Code. Codex has its own extraction in codex-rollout-parser.ts
+ *  because the injection format is structurally different (e.g. real prompts
+ *  wrapped inside a "# Context from my IDE setup:" block, reachable via the
+ *  "## My request for Codex:" marker). */
 export const SYSTEM_CONTENT_PREFIXES = [
   'This session is being continued',
   '<ide_',

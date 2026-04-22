@@ -3,31 +3,45 @@ import { VisualizerPanel } from './webview-provider'
 import { JsonlEventSource } from './event-source'
 import { WebviewToExtensionMessage } from './protocol'
 import { startClaudeRuntime } from './claude-runtime'
+import { startCodexRuntime } from './codex-runtime'
 import { promptHookSetupIfNeeded, configureClaudeHooks, isDisable1MContext } from './hooks-config'
 import { createLogger } from './logger'
 import type { AgentRuntime, AgentRuntimeMode } from './session-runtime'
 
 const log = createLogger('Extension')
 
-let eventSource: JsonlEventSource | undefined
-let runtime: AgentRuntime | undefined
+type ConfiguredRuntimeMode = AgentRuntimeMode | 'auto'
 
-async function startRuntime(
-  mode: AgentRuntimeMode,
+let eventSource: JsonlEventSource | undefined
+let runtimes: AgentRuntime[] = []
+
+function readConfiguredMode(): ConfiguredRuntimeMode {
+  const raw = vscode.workspace.getConfiguration('agentVisualizer').get<string>('runtime', 'auto')
+  return raw === 'claude' || raw === 'codex' ? raw : 'auto'
+}
+
+async function startRuntimes(
+  mode: ConfiguredRuntimeMode,
   context: vscode.ExtensionContext,
-): Promise<AgentRuntime> {
+): Promise<AgentRuntime[]> {
   switch (mode) {
     case 'claude':
-      return startClaudeRuntime(context)
+      return [await startClaudeRuntime(context)]
     case 'codex':
-      throw new Error('Codex runtime not yet implemented')
+      return [startCodexRuntime(context)]
+    case 'auto':
+      // Auto mode: run both. Each watches its own session source; the webview
+      // already multiplexes sessions by sessionId, so they coexist cleanly.
+      return [await startClaudeRuntime(context), startCodexRuntime(context)]
   }
 }
 
 export async function activate(context: vscode.ExtensionContext) {
   log.info('Extension activated')
 
-  runtime = await startRuntime('claude', context)
+  const mode = readConfiguredMode()
+  log.info(`Runtime mode: ${mode}`)
+  runtimes = await startRuntimes(mode, context)
 
   // ─── Commands ──────────────────────────────────────────────────────────────
 
@@ -35,7 +49,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('agentVisualizer.open', () => {
       const panel = VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.One)
       wirePanel(panel)
-      promptHookSetupIfNeeded(context)
+      promptHookSetupIfNeededForClaude(context)
     }),
   )
 
@@ -43,7 +57,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('agentVisualizer.openToSide', () => {
       const panel = VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.Beside)
       wirePanel(panel)
-      promptHookSetupIfNeeded(context)
+      promptHookSetupIfNeededForClaude(context)
     }),
   )
 
@@ -99,6 +113,34 @@ export async function activate(context: vscode.ExtensionContext) {
   })
 }
 
+/** Only prompt for Claude hook setup if a Claude runtime is active —
+ *  otherwise a Codex-only user would see an irrelevant prompt. */
+function promptHookSetupIfNeededForClaude(context: vscode.ExtensionContext): void {
+  if (runtimes.some(r => r.mode === 'claude')) {
+    promptHookSetupIfNeeded(context)
+  }
+}
+
+function collectActiveSessions(): ReturnType<AgentRuntime['watcher']['getActiveSessions']> {
+  const all: ReturnType<AgentRuntime['watcher']['getActiveSessions']> = []
+  for (const r of runtimes) all.push(...r.watcher.getActiveSessions())
+  return all
+}
+
+function replaySessions(sessionIds: string[]): void {
+  for (const r of runtimes) {
+    const ownIds = r.watcher.getActiveSessions()
+      .map(s => s.id)
+      .filter(id => sessionIds.includes(id))
+    if (ownIds.length > 0) r.watcher.replaySessionStart(ownIds)
+  }
+}
+
+function combinedConnectionStatus(): string {
+  if (runtimes.length === 0) return 'disconnected'
+  return runtimes.map(r => r.connectionStatus()).join(' + ')
+}
+
 function wirePanel(panel: VisualizerPanel): void {
   if (panel.isWired) { return }
   panel.markWired()
@@ -121,17 +163,15 @@ function wirePanel(panel: VisualizerPanel): void {
           panel.postMessage({ type: 'config', config: { disable1MContext: true } })
         }
         // Report current connection status and replay active sessions
-        if (runtime) {
-          // Send session list FIRST so the webview selects a session
-          // before replay events arrive (otherwise they have no selected
-          // session to match and are only buffered, not delivered).
-          const sessions = runtime.watcher.getActiveSessions()
-          if (sessions.length > 0) {
-            panel.postMessage({ type: 'session-list', sessions })
-            runtime.watcher.replaySessionStart(sessions.map(s => s.id))
-          }
-          panel.setConnectionStatus('watching', runtime.connectionStatus())
+        // Send session list FIRST so the webview selects a session
+        // before replay events arrive (otherwise they have no selected
+        // session to match and are only buffered, not delivered).
+        const sessions = collectActiveSessions()
+        if (sessions.length > 0) {
+          panel.postMessage({ type: 'session-list', sessions })
+          replaySessions(sessions.map(s => s.id))
         }
+        panel.setConnectionStatus('watching', combinedConnectionStatus())
         break
 
       case 'request-connect':
@@ -213,8 +253,6 @@ async function handleOpenFile(filePath: string, line?: number): Promise<void> {
 
 export function deactivate(): void {
   disconnectEventSource()
-  if (runtime) {
-    runtime.dispose()
-    runtime = undefined
-  }
+  for (const r of runtimes) r.dispose()
+  runtimes = []
 }

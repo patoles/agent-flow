@@ -52,6 +52,12 @@
     "configuration": {
       "title": "Agent Flow",
       "properties": {
+        "agentVisualizer.runtime": {
+          "type": "string",
+          "enum": ["auto", "claude", "codex"],
+          "default": "auto",
+          "description": "Which agent runtime(s) to watch. 'auto' watches both Claude Code and Codex concurrently."
+        },
         "agentVisualizer.devServerPort": {
           "type": "number",
           "default": 0,
