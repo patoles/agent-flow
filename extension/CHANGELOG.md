@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+- **Opus 4.7 support** (#43)
+  - Context window sizing now uses family-based pattern matching, so new Opus/Sonnet releases (4.7, future 4.x / 5.x) pick up their 1M context without a code change
+  - Redacted thinking blocks (Opus 4.7 returns thinking as an encrypted signature by default) now show a "Thinking..." placeholder bubble instead of being silently dropped
+- Fix: Windows hook deduplication — `isAgentFlowHook` now normalizes path separators before matching, so old entries are correctly replaced on re-registration (prevents settings.json from accumulating duplicates) (#42)
+- Fix: respect `CLAUDE_CODE_DISABLE_1M_CONTEXT` env var and setting — context gauge caps to 200k when set (#39)
+- Fix: relay path encoding for non-ASCII workspace paths (CJK, Cyrillic, accented Latin) (#38)
+- Fix: duplicate subagent nodes from hook server and transcript parser race (#34)
+- Fix: duplicate React key warning on session switch (#33)
+- Fix: web app SSE connection failure in standalone dev mode (#32)
+
 ## 0.6.2
 
 - Fix: session detection for workspace paths containing underscores or other special characters (#18, #19)
