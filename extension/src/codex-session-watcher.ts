@@ -16,7 +16,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { AgentEvent, SessionInfo } from './protocol'
 import {
-  INACTIVITY_TIMEOUT_MS, ORCHESTRATOR_NAME,
+  ACTIVE_SESSION_AGE_S, INACTIVITY_TIMEOUT_MS, ORCHESTRATOR_NAME,
   POLL_FALLBACK_MS, SCAN_INTERVAL_MS, SESSION_ID_DISPLAY,
 } from './constants'
 import { readNewFileLines } from './fs-utils'
@@ -32,13 +32,6 @@ const log = createLogger('CodexSessionWatcher')
 /** Number of past YYYY/MM/DD directories to scan during discovery.
  *  3 covers sessions near midnight + timezone-drift. */
 const SCAN_DAYS = 3
-
-/** Max session age to pick up during discovery.
- *  Codex rollouts can sit idle much longer than Claude transcripts —
- *  a user may leave a Codex CLI open for hours between interactions.
- *  This controls initial discovery only; inactivity timeout (INACTIVITY_TIMEOUT_MS)
- *  still marks attached sessions as complete after they go idle. */
-const CODEX_ACTIVE_SESSION_AGE_S = 4 * 60 * 60 // 4 hours
 
 /** Extract the session UUID from a rollout filename.
  *  Filenames look like: rollout-2026-04-22T09-15-00-{uuid}.jsonl */
@@ -208,7 +201,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
         try { stat = fs.statSync(filePath) } catch { continue }
         if (stat.size === 0) continue
         const ageS = (Date.now() - stat.mtimeMs) / 1000
-        if (ageS > CODEX_ACTIVE_SESSION_AGE_S) continue
+        if (ageS > ACTIVE_SESSION_AGE_S) continue
 
         // Workspace filter — only attach if cwd matches (or no workspace set)
         if (this.workspacePath) {

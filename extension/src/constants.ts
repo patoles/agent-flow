@@ -22,8 +22,10 @@ export const PERMISSION_DETECT_MS = 5000
 
 /** JSONL files modified within this many seconds are considered active.
  *  Must be longer than INACTIVITY_TIMEOUT_MS to avoid dropping sessions
- *  during long thinking pauses. */
-export const ACTIVE_SESSION_AGE_S = 10 * 60 // 10 minutes
+ *  during long thinking pauses. Generous by design — a user with an
+ *  open Claude Code or Codex CLI that's been idle across a break should
+ *  still see their session picked up when they open the visualizer. */
+export const ACTIVE_SESSION_AGE_S = 4 * 60 * 60 // 4 hours
 
 /** Duration of VS Code status bar messages (ms) */
 export const STATUS_MESSAGE_DURATION_MS = 5000
