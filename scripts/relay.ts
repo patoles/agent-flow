@@ -14,6 +14,7 @@ import { TranscriptParser } from '../extension/src/transcript-parser'
 import { readNewFileLines } from '../extension/src/fs-utils'
 import { scanSubagentsDir, readSubagentNewLines } from '../extension/src/subagent-watcher'
 import { handlePermissionDetection } from '../extension/src/permission-detection'
+import { CodexSessionWatcher } from '../extension/src/codex-session-watcher'
 import {
   INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, SYSTEM_PROMPT_BASE_TOKENS, ORCHESTRATOR_NAME,
@@ -364,6 +365,16 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     } catch {}
   }
 
+  // ─── Codex runtime ────────────────────────────────────────────────────────
+  // Watch Codex rollouts in parallel. No-op if ~/.codex/sessions doesn't
+  // exist or no sessions match the current workspace.
+  const codexWatcher = new CodexSessionWatcher(workspace)
+  codexWatcher.onEvent((event) => broadcastEvent(event))
+  codexWatcher.onSessionLifecycle((lifecycle) => {
+    broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label)
+  })
+  codexWatcher.start()
+
   return {
     handleSSE(req: http.IncomingMessage, res: http.ServerResponse) {
       res.writeHead(200, {
@@ -380,7 +391,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         log(`[sse] Client disconnected (${sseClients.size} total)`)
       })
 
-      // Send current session list
+      // Send current session list (Claude + Codex)
       const sessionList: SessionInfo[] = []
       for (const session of sessions.values()) {
         if (!session.sessionDetected) continue
@@ -390,6 +401,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
           startTime: session.sessionStartTime, lastActivityTime: session.lastActivityTime,
         })
       }
+      sessionList.push(...codexWatcher.getActiveSessions())
       if (sessionList.length > 0) {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }
@@ -419,6 +431,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         if (session.pollTimer) clearInterval(session.pollTimer)
         if (session.inactivityTimer) clearTimeout(session.inactivityTimer)
       }
+      codexWatcher.dispose()
     },
   }
 }

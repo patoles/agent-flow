@@ -11,7 +11,6 @@
  * CODEX_HOME for non-default installs.
  */
 
-import * as vscode from 'vscode'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
@@ -26,6 +25,7 @@ import {
   CodexRolloutParser, CodexRolloutState, createCodexRolloutState,
 } from './codex-rollout-parser'
 import type { AgentSessionWatcher, SessionLifecycleEvent } from './session-runtime'
+import { TypedEventEmitter } from './typed-event-emitter'
 
 const log = createLogger('CodexSessionWatcher')
 
@@ -117,13 +117,17 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
   private workspacePath: string | null = null
   private scanInterval: NodeJS.Timeout | null = null
 
-  private readonly _onEvent = new vscode.EventEmitter<AgentEvent>()
-  private readonly _onSessionDetected = new vscode.EventEmitter<string>()
-  private readonly _onSessionLifecycle = new vscode.EventEmitter<SessionLifecycleEvent>()
+  private readonly _onEvent = new TypedEventEmitter<AgentEvent>()
+  private readonly _onSessionDetected = new TypedEventEmitter<string>()
+  private readonly _onSessionLifecycle = new TypedEventEmitter<SessionLifecycleEvent>()
 
   readonly onEvent = this._onEvent.event
   readonly onSessionDetected = this._onSessionDetected.event
   readonly onSessionLifecycle = this._onSessionLifecycle.event
+
+  /** Optional workspace override for non-VS Code hosts (relay, CLI).
+   *  If provided, takes precedence over any runtime workspace lookup. */
+  constructor(private readonly workspaceOverride?: string | null) {}
 
   isActive(): boolean {
     for (const s of this.sessions.values()) {
@@ -156,10 +160,9 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
   }
 
   start(): void {
-    const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-    if (workspace) {
-      try { this.workspacePath = fs.realpathSync(workspace) }
-      catch { this.workspacePath = workspace }
+    if (this.workspaceOverride) {
+      try { this.workspacePath = fs.realpathSync(this.workspaceOverride) }
+      catch { this.workspacePath = this.workspaceOverride }
     }
 
     this.scanForSessions()

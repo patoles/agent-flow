@@ -13,6 +13,7 @@ import * as vscode from 'vscode'
 import type { AgentEvent, SessionInfo } from './protocol'
 import { VisualizerPanel } from './webview-provider'
 import { SESSION_ID_DISPLAY, STATUS_MESSAGE_DURATION_MS } from './constants'
+import type { TypedDisposable, TypedEvent } from './typed-event-emitter'
 
 export type AgentRuntimeMode = 'claude' | 'codex'
 
@@ -22,10 +23,12 @@ export interface SessionLifecycleEvent {
   label: string
 }
 
-export interface AgentSessionWatcher extends vscode.Disposable {
-  readonly onEvent: vscode.Event<AgentEvent>
-  readonly onSessionDetected: vscode.Event<string>
-  readonly onSessionLifecycle: vscode.Event<SessionLifecycleEvent>
+/** Interface every runtime's watcher implements. Uses portable typed-event
+ *  types (not vscode.Event) so watchers can run in the relay/CLI too. */
+export interface AgentSessionWatcher extends TypedDisposable {
+  readonly onEvent: TypedEvent<AgentEvent>
+  readonly onSessionDetected: TypedEvent<string>
+  readonly onSessionLifecycle: TypedEvent<SessionLifecycleEvent>
   start(): void
   isActive(): boolean
   isSessionActive(sessionId: string): boolean

@@ -63,9 +63,9 @@ Agent Flow automatically configures Claude Code hooks the first time you open th
 
 ### Runtime selection
 
-By default Agent Flow watches both Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`) concurrently. Sessions are shown side-by-side and tagged by runtime. If you only use one, the other is a harmless no-op — no visible effect, no user action needed.
+By default Agent Flow watches both Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`) concurrently in all three entry points (VS Code extension, `pnpm run dev`, `npx agent-flow-app`). Sessions are shown side-by-side and tagged by runtime. If you only use one, the other is a harmless no-op — no visible effect, no user action needed.
 
-To restrict to a single runtime, set `agentVisualizer.runtime` to `"claude"` or `"codex"` in your settings. For non-default Codex installs, set the `CODEX_HOME` environment variable.
+The VS Code extension exposes a `agentVisualizer.runtime` setting (`"auto"` / `"claude"` / `"codex"`) to restrict to one runtime. For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
 ### JSONL Event Log
 
