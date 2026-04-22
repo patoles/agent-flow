@@ -296,7 +296,7 @@ export class CodexRolloutParser {
     this.delegate.emit({
       time: this.delegate.elapsed(),
       type: 'agent_spawn',
-      payload: { name: ORCHESTRATOR_NAME, isMain: true, task: 'Codex session' },
+      payload: { name: ORCHESTRATOR_NAME, isMain: true, task: 'Codex session', runtime: 'codex' },
     })
   }
 
