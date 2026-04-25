@@ -132,6 +132,11 @@ Other scripts:
 | `pnpm run build:extension` | Build the extension |
 | `pnpm run build:webview` | Build the webview assets |
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=patoles/agent-flow&type=date&legend=bottom-right)](https://www.star-history.com/?repos=patoles%2Fagent-flow&type=date&legend=bottom-right)
+
+
 ## Author
 
 Created by [Simon Patole](https://github.com/patoles), for [CraftMyGame](https://craftmygame.com).
@@ -153,6 +158,7 @@ paths, tool calls, user info, and environment variables are never sent.
   in [scripts/telemetry.ts](scripts/telemetry.ts)
 - **Reset your anonymous identity:** delete `~/.agent-flow/installation-id` —
   a fresh random UUIDv4 will be generated on next run
+
 
 ## License
 
