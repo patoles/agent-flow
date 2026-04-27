@@ -4,13 +4,19 @@ import {
   AGENT_DRAW, CONTEXT_BAR, CONTEXT_RING, STATS_OVERLAY,
 } from '@/lib/canvas-constants'
 import { alphaHex, formatTokens } from '@/lib/utils'
-import { truncateText, drawHexagon, CLAUDE_SPARK_D } from './draw-misc'
+import { truncateText, drawHexagon, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
 import { getAgentGlowSprite } from './render-cache'
 
 let _claudeSparkPath: Path2D | null = null
 export function getClaudeSparkPath() {
   if (!_claudeSparkPath) _claudeSparkPath = new Path2D(CLAUDE_SPARK_D)
   return _claudeSparkPath
+}
+
+let _openaiLogoPath: Path2D | null = null
+function getOpenAILogoPath() {
+  if (!_openaiLogoPath) _openaiLogoPath = new Path2D(OPENAI_LOGO_D)
+  return _openaiLogoPath
 }
 
 export function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string) {
@@ -24,6 +30,30 @@ export function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: n
   ctx.shadowBlur = 6 / scale
   ctx.fill(getClaudeSparkPath())
   ctx.restore()
+}
+
+export function drawOpenAILogo(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string) {
+  ctx.save()
+  ctx.translate(cx, cy)
+  // Target diameter matches the Claude spark: (r * sparkScale) total.
+  const scale = (r * AGENT_DRAW.sparkScale) / OPENAI_LOGO_VIEWBOX
+  ctx.scale(scale, scale)
+  ctx.translate(-OPENAI_LOGO_VIEWBOX / 2, -OPENAI_LOGO_VIEWBOX / 2)
+  ctx.fillStyle = color
+  ctx.shadowColor = color
+  ctx.shadowBlur = 6 / scale
+  ctx.fill(getOpenAILogoPath())
+  ctx.restore()
+}
+
+/** Pick the brand logo for the agent's runtime. Defaults to Claude. */
+export function drawAgentBrand(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number, color: string,
+  runtime: Agent['runtime'],
+) {
+  if (runtime === 'codex') drawOpenAILogo(ctx, cx, cy, r, color)
+  else drawClaudeSpark(ctx, cx, cy, r, color)
 }
 
 export function drawContextComposition(
@@ -225,7 +255,7 @@ function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, 
     ctx.stroke()
     ctx.restore()
   } else if (agent.isMain) {
-    drawClaudeSpark(ctx, agent.x, agent.y, r, color + '90')
+    drawAgentBrand(ctx, agent.x, agent.y, r, color + '90', agent.runtime)
   } else {
     ctx.fillStyle = color + '90'
     ctx.font = `${r * AGENT_DRAW.subIconScale}px monospace`

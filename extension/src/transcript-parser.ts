@@ -53,6 +53,26 @@ function safeThinking(block: unknown): string {
   return String(block.thinking || '').trim()
 }
 
+/** Returns the signature string if a thinking block is redacted
+ *  (plaintext stripped but signature present, as Opus 4.7+ does), else null. */
+function redactedThinkingSignature(block: unknown): string | null {
+  if (!isRecord(block)) return null
+  if (String(block.thinking || '').trim()) return null
+  const sig = block.signature
+  return typeof sig === 'string' && sig.length > 0 ? sig : null
+}
+
+/** Build the dedup hash key for a thinking block. Prefers the transcript entry
+ *  UUID; falls back to a prefix of the content (or signature, for redacted blocks). */
+function thinkingHashKey(entryUuid: string | undefined, fallbackSource: string): string {
+  return entryUuid
+    ? `thinking:${entryUuid}`
+    : `thinking:${fallbackSource.slice(0, HASH_PREFIX_MAX)}`
+}
+
+/** Placeholder shown for redacted thinking blocks (matches Claude Code's UI label). */
+const REDACTED_THINKING_LABEL = 'Thinking...'
+
 export class TranscriptParser {
   /** Per-subagent dedup state for inline progress events, keyed by parentToolUseID */
   private inlineSubagentState = new Map<string, {
@@ -211,7 +231,8 @@ export class TranscriptParser {
     }, sessionId)
   }
 
-  /** Process a thinking block — dedup, track tokens, emit message event */
+  /** Process a thinking block — dedup, track tokens, emit message event.
+   *  Redacted thinking (Opus 4.7+) is shown as a "Thinking..." placeholder. */
   private handleThinkingBlock(
     block: unknown,
     entryUuid: string | undefined,
@@ -221,17 +242,23 @@ export class TranscriptParser {
     sessionId?: string,
   ): void {
     const thinking = safeThinking(block)
-    if (!thinking) return
+    const redactedSig = thinking ? null : redactedThinkingSignature(block)
+    if (!thinking && !redactedSig) return
 
-    const hash = entryUuid ? `thinking:${entryUuid}` : `thinking:${thinking.slice(0, HASH_PREFIX_MAX)}`
+    const hash = thinkingHashKey(entryUuid, thinking || redactedSig || '')
     if (seenMsgs?.has(hash)) return
     seenMsgs?.add(hash)
 
-    if (session) { session.contextBreakdown.reasoning += estimateTokensFromText(thinking) }
+    // Reasoning tokens are unknown for redacted blocks — skip breakdown update
+    if (session && thinking) { session.contextBreakdown.reasoning += estimateTokensFromText(thinking) }
     this.delegate.emit({
       time: this.delegate.elapsed(sessionId),
       type: 'message',
-      payload: { agent: agentName, role: 'thinking', content: thinking.slice(0, MESSAGE_MAX) },
+      payload: {
+        agent: agentName,
+        role: 'thinking',
+        content: thinking ? thinking.slice(0, MESSAGE_MAX) : REDACTED_THINKING_LABEL,
+      },
     }, sessionId)
   }
 
@@ -449,10 +476,10 @@ export class TranscriptParser {
                 }
               } else if (block.type === 'thinking' && 'thinking' in block) {
                 const thinking = safeThinking(block)
-                if (thinking) {
-                  const hashKey = entry.uuid ? `thinking:${entry.uuid}` : `thinking:${thinking.slice(0, HASH_PREFIX_MAX)}`
-                  session.seenMessageHashes.add(hashKey)
-                  session.contextBreakdown.reasoning += estimateTokensFromText(thinking)
+                const redactedSig = thinking ? null : redactedThinkingSignature(block)
+                if (thinking || redactedSig) {
+                  session.seenMessageHashes.add(thinkingHashKey(entry.uuid, thinking || redactedSig || ''))
+                  if (thinking) { session.contextBreakdown.reasoning += estimateTokensFromText(thinking) }
                 }
               }
             }

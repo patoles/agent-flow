@@ -1,6 +1,13 @@
 /**
- * Shared tool summarization utilities.
+ * Shared tool summarization utilities for Claude Code tools.
  * Extracts duplicated logic from session-watcher.ts and hook-server.ts.
+ *
+ * Claude-only by convention: Codex tool summaries are produced inline in
+ * codex-rollout-parser.ts because Codex's function_call shape and tool names
+ * (exec_command, apply_patch, update_plan, write_stdin, web_search_call, …)
+ * don't overlap with Claude's. If a future refactor unifies them, this
+ * module would become the natural home — but until then, don't add Codex
+ * cases here without a plan for dispatching by runtime.
  */
 
 import {
@@ -62,6 +69,25 @@ export function summarizeInput(toolName: string, input?: Record<string, unknown>
       return String(input.skill || '').slice(0, SKILL_NAME_MAX)
     case 'NotebookEdit':
       return tailPath(String(input.notebook_path || '')) + ` cell ${input.cell_number ?? '?'}`
+    // ─── Codex tools ────────────────────────────────────────────────────────
+    case 'exec_command':
+      return String(input.cmd || input.command || '').slice(0, ARGS_MAX)
+    case 'write_stdin':
+      return String(input.input || input.stdin || '').slice(0, ARGS_MAX)
+    case 'update_plan': {
+      const items = input.plan as Array<{ step?: string; status?: string }> | undefined
+      if (Array.isArray(items) && items.length > 0) {
+        const active = items.find(i => i.status === 'in_progress')
+        const label = active?.step || items[0]?.step || 'plan'
+        const done = items.filter(i => i.status === 'completed').length
+        return `${label} (${done}/${items.length})`.slice(0, ARGS_MAX)
+      }
+      return 'updating plan'
+    }
+    case 'apply_patch':
+      // apply_patch arrives as a custom_tool_call with raw patch text in input.
+      // First line usually reads "*** Begin Patch\n*** Update File: /path/..."
+      return String(input.patch || '').split('\n').slice(0, 3).join(' ').slice(0, ARGS_MAX) || 'apply patch'
     default:
       return JSON.stringify(input).slice(0, ARGS_MAX)
   }
@@ -147,6 +173,18 @@ export function extractInputData(toolName: string, input: Record<string, unknown
           })) : [],
         }
       }
+      // ─── Codex tools ────────────────────────────────────────────────────
+      case 'exec_command':
+        return {
+          command: String(input.cmd || input.command || ''),
+          workdir: typeof input.workdir === 'string' ? input.workdir : undefined,
+        }
+      case 'apply_patch':
+        return {
+          patch: String(input.patch || '').slice(0, EDIT_CONTENT_MAX),
+        }
+      case 'update_plan':
+        return { plan: input.plan }
       default:
         return undefined
     }

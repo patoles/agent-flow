@@ -1,8 +1,8 @@
 {
   "name": "agent-flow",
   "displayName": "Agent Flow",
-  "description": "Real-time visualization of Claude Code agent orchestration",
-  "version": "0.6.2",
+  "description": "Real-time visualization of Claude Code and Codex agent orchestration",
+  "version": "0.8.1",
   "publisher": "simon-p",
   "license": "Apache-2.0",
   "repository": {
@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Visualization", "Other"],
-  "keywords": ["llm", "agent", "claude", "ai", "visualization", "orchestration"],
+  "keywords": ["llm", "agent", "claude", "codex", "ai", "visualization", "orchestration"],
   "activationEvents": [
     "onWebviewPanel:agentVisualizer"
   ],
@@ -52,6 +52,17 @@
     "configuration": {
       "title": "Agent Flow",
       "properties": {
+        "agentVisualizer.runtime": {
+          "type": "string",
+          "enum": ["auto", "claude", "codex"],
+          "enumDescriptions": [
+            "Watch both Claude Code and Codex sessions concurrently (default)",
+            "Watch only Claude Code sessions",
+            "Watch only Codex sessions"
+          ],
+          "default": "auto",
+          "description": "Which agent runtime(s) to watch. In auto mode, runtimes you don't use are harmless no-ops (no session directory = nothing to scan)."
+        },
         "agentVisualizer.devServerPort": {
           "type": "number",
           "default": 0,
@@ -78,12 +89,15 @@
     "watch": "node esbuild.js --watch",
     "package": "vsce package",
     "lint": "tsc --noEmit",
+    "lint:test": "tsc --noEmit --project tsconfig.test.json",
+    "test": "tsx --test test/**/*.test.ts",
     "vscode:uninstall": "node scripts/uninstall.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
     "esbuild": "^0.20.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.3.0"
   }
 }

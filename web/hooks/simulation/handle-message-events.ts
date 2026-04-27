@@ -65,11 +65,17 @@ export function handleContextUpdate(
   const tokens = asNumber(payload.tokens)
   const raw = payload.breakdown
   const breakdown = (raw && typeof raw === 'object' && 'systemPrompt' in raw) ? raw as ContextBreakdown : undefined
+  // Optional override from runtimes that report an authoritative context window
+  // (e.g. Codex's event_msg.token_count.info.model_context_window).
+  const tokensMaxOverride = typeof payload.tokensMax === 'number' && payload.tokensMax > 0
+    ? payload.tokensMax
+    : undefined
   const agent = state.agents.get(agentName)
   if (agent) {
     state.agents.set(agentName, {
       ...agent,
       tokensUsed: tokens,
+      tokensMax: tokensMaxOverride ?? agent.tokensMax,
       contextBreakdown: breakdown || agent.contextBreakdown,
       state: agent.state === 'complete' ? 'complete' : 'thinking'
     })

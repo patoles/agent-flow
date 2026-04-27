@@ -1,6 +1,6 @@
 # Agent Flow
 
-Real-time visualization of Claude Code agent orchestration. Watch your agents think, branch, and coordinate as they work. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA). 
+Real-time visualization of Claude Code and Codex agent orchestration. Watch your agents think, branch, and coordinate as they work. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA). 
 
 ![Agent Flow visualization](https://res.cloudinary.com/dxlvclh9c/image/upload/v1773924941/screenshot_e7yox3.png)
 
@@ -18,8 +18,9 @@ Claude Code is powerful, but its execution is a black box — you see the final 
 ## Features
 
 - **Live agent visualization**: Watch agent execution as an interactive node graph with real-time tool calls, branching, and return flows
-- **Auto-detect Claude Code sessions**: Automatically discovers active Claude Code sessions in your workspace and streams events
+- **Claude Code + Codex**: Auto-detects sessions from both runtimes concurrently and shows them side-by-side, or restrict to one via the `agentVisualizer.runtime` setting
 - **Claude Code hooks**: Lightweight HTTP hook server receives events directly from Claude Code for zero-latency streaming
+- **Codex rollout tailing**: Reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and surfaces tool calls, reasoning, and authoritative token counts from Codex's own event stream
 - **Multi-session support**: Track multiple concurrent agent sessions with tabs
 - **Interactive canvas**: Pan, zoom, click agents and tool calls to inspect details
 - **Timeline & transcript panels**: Review the full execution timeline, file attention heatmap, and message transcript
@@ -56,9 +57,20 @@ Open http://localhost:3000 and start a Claude Code session in another terminal �
 
 1. Install the extension
 2. Open the Command Palette (`Cmd+Shift+P`) and run **Agent Flow: Open Agent Flow**
-3. Start a Claude Code session in your workspace — Agent Flow will auto-detect it
+3. Start a Claude Code or Codex session in your workspace — Agent Flow will auto-detect it
 
 Agent Flow automatically configures Claude Code hooks the first time you open the panel. To manually reconfigure, run **Agent Flow: Configure Claude Code Hooks** from the Command Palette.
+
+### Runtime selection
+
+By default Agent Flow watches both Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`) concurrently in all three entry points (VS Code extension, `pnpm run dev`, `npx agent-flow-app`). Sessions are shown side-by-side and tagged by runtime. If you only use one, the other is a harmless no-op — no visible effect, no user action needed.
+
+To restrict to one runtime:
+
+- **VS Code extension:** set `agentVisualizer.runtime` to `"auto"` / `"claude"` / `"codex"` in your settings
+- **`pnpm run dev` and `npx agent-flow-app`:** set the `AGENT_FLOW_RUNTIME` environment variable to `claude` or `codex` (defaults to watching both)
+
+For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
 ### JSONL Event Log
 
@@ -86,6 +98,7 @@ You can also point Agent Flow at a JSONL event log file:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `agentVisualizer.runtime` | `"auto"` | Which agent runtime(s) to watch: `"auto"` (both), `"claude"`, or `"codex"` |
 | `agentVisualizer.devServerPort` | `0` | Development server port (0 = production mode) |
 | `agentVisualizer.eventLogPath` | `""` | Path to a JSONL event log file to watch |
 | `agentVisualizer.autoOpen` | `false` | Auto-open when an agent session starts |
@@ -119,9 +132,33 @@ Other scripts:
 | `pnpm run build:extension` | Build the extension |
 | `pnpm run build:webview` | Build the webview assets |
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=patoles/agent-flow&type=date&legend=bottom-right)](https://www.star-history.com/?repos=patoles%2Fagent-flow&type=date&legend=bottom-right)
+
+
 ## Author
 
 Created by [Simon Patole](https://github.com/patoles), for [CraftMyGame](https://craftmygame.com).
+
+## Privacy & Telemetry
+
+Agent Flow ships **opt-out** anonymous usage telemetry, enabled by default only
+in the published `npx agent-flow-app` binary. `pnpm run dev` and the VS Code
+extension emit nothing. Only aggregate events are sent — session count,
+duration, event count, OS/arch, Agent Flow version, distinct model IDs
+observed, which runtimes were watched, and error class names. Prompts, file
+paths, tool calls, user info, and environment variables are never sent.
+
+- **Turn off:** `export AGENT_FLOW_TELEMETRY=false` or `export DO_NOT_TRACK=1`
+  (disabled installs write zero state to disk — no `~/.agent-flow/` directory)
+- **Inspect the payload:** `cat ~/.agent-flow/telemetry/events.jsonl`
+- **Full schema + exact fields:** see the v0.8.1 entry in
+  [extension/CHANGELOG.md](extension/CHANGELOG.md) or the `serialize()` function
+  in [scripts/telemetry.ts](scripts/telemetry.ts)
+- **Reset your anonymous identity:** delete `~/.agent-flow/installation-id` —
+  a fresh random UUIDv4 will be generated on next run
+
 
 ## License
 

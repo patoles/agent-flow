@@ -20,9 +20,14 @@ export const POLL_FALLBACK_MS = 3000
  *  Must be long enough that normal tool execution won't trigger it. */
 export const PERMISSION_DETECT_MS = 5000
 
-/** JSONL files modified within this many seconds are considered active.
- *  Must be longer than INACTIVITY_TIMEOUT_MS to avoid dropping sessions
- *  during long thinking pauses. */
+/** JSONL files modified within this many seconds are considered active
+ *  at discovery time. Must be longer than INACTIVITY_TIMEOUT_MS to avoid
+ *  dropping sessions during long thinking pauses.
+ *
+ *  Filter is discovery-time only — stale sessions that receive new writes
+ *  refresh their mtime and are picked up by the next scan tick
+ *  (SCAN_INTERVAL_MS). A user resuming a long-idle session should see it
+ *  attach within ~1s of their next message. */
 export const ACTIVE_SESSION_AGE_S = 10 * 60 // 10 minutes
 
 /** Duration of VS Code status bar messages (ms) */
@@ -40,8 +45,11 @@ export const DEFAULT_DEV_PORT = 3002
 /** Default SSE relay port (used by dev relay, standalone app, and webview build) */
 export const DEFAULT_RELAY_PORT = 3001
 
-/** Default dev web app origin (for CORS in dev relay) */
-export const DEV_WEB_ORIGIN = 'http://localhost:3000'
+/** Accept CORS requests from any localhost origin during dev — Next.js falls
+ *  back to a higher port when 3000 is taken, so a single hard-coded value
+ *  would silently break dev. The relay binds to 127.0.0.1 already, so this
+ *  pattern is safe (no external origin can reach it). */
+export const DEV_WEB_ORIGIN_PATTERN = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/
 
 /** Returned by HookServer.start() when the port is already in use by another instance */
 export const HOOK_SERVER_NOT_STARTED = -1
@@ -189,7 +197,11 @@ export function resolveSubagentChildName(input: Record<string, unknown>): string
   return String(input.description || input.subagent_type || 'subagent').slice(0, CHILD_NAME_MAX)
 }
 
-/** Prefixes that identify system-injected content (not real user messages) */
+/** Prefixes that identify system-injected content (not real user messages)
+ *  for Claude Code. Codex has its own extraction in codex-rollout-parser.ts
+ *  because the injection format is structurally different (e.g. real prompts
+ *  wrapped inside a "# Context from my IDE setup:" block, reachable via the
+ *  "## My request for Codex:" marker). */
 export const SYSTEM_CONTENT_PREFIXES = [
   'This session is being continued',
   '<ide_',

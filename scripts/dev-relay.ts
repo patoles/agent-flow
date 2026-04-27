@@ -5,7 +5,7 @@
  */
 import * as http from 'http'
 import { createRelay } from './relay'
-import { DEFAULT_RELAY_PORT, DEV_WEB_ORIGIN } from '../extension/src/constants'
+import { DEFAULT_RELAY_PORT, DEV_WEB_ORIGIN_PATTERN } from '../extension/src/constants'
 
 async function main() {
   const workspace = process.argv[2] || process.cwd()
@@ -16,7 +16,13 @@ async function main() {
   const relay = await createRelay({ workspace, verbose: true })
 
   const server = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', DEV_WEB_ORIGIN)
+    // Echo back the request Origin if it matches a localhost pattern, so
+    // CORS survives Next.js picking a fallback port when 3000 is busy.
+    const origin = req.headers.origin
+    if (typeof origin === 'string' && DEV_WEB_ORIGIN_PATTERN.test(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Vary', 'Origin')
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 

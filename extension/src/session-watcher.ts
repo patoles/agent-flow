@@ -7,6 +7,7 @@ import {
   INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, SYSTEM_PROMPT_BASE_TOKENS, ORCHESTRATOR_NAME,
 } from './constants'
+import type { AgentSessionWatcher, SessionLifecycleEvent } from './session-runtime'
 import { TranscriptParser } from './transcript-parser'
 import { readNewFileLines } from './fs-utils'
 import { handlePermissionDetection } from './permission-detection'
@@ -38,7 +39,7 @@ export type { WatchedSession, SubagentState } from './protocol'
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects')
 
-export class SessionWatcher implements vscode.Disposable {
+export class SessionWatcher implements AgentSessionWatcher {
   private dirWatcher: fs.FSWatcher | null = null
   private dirWatchers = new Map<string, fs.FSWatcher>()
   private sessions = new Map<string, WatchedSession>()
@@ -51,7 +52,7 @@ export class SessionWatcher implements vscode.Disposable {
 
   private readonly _onEvent = new vscode.EventEmitter<AgentEvent>()
   private readonly _onSessionDetected = new vscode.EventEmitter<string>()
-  private readonly _onSessionLifecycle = new vscode.EventEmitter<{ type: 'started' | 'ended' | 'updated'; sessionId: string; label: string }>()
+  private readonly _onSessionLifecycle = new vscode.EventEmitter<SessionLifecycleEvent>()
 
   private readonly parser: TranscriptParser = new TranscriptParser({
     emit: (event, sessionId) => this.emit(event, sessionId),

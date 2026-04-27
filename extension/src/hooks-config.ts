@@ -29,7 +29,9 @@ function readGlobalSettings(): Record<string, unknown> | null {
 /** Check whether a single hook entry belongs to Agent Flow */
 function isAgentFlowHook(entry: ClaudeHookEntry): boolean {
   return !!entry.hooks?.some(h =>
-    h.command?.includes(HOOK_COMMAND_MARKER) ||
+    // Normalize backslashes to forward slashes so Windows paths
+    // (e.g. "C:\\Users\\...\\agent-flow\\hook.js") match HOOK_COMMAND_MARKER.
+    h.command?.replace(/\\/g, '/').includes(HOOK_COMMAND_MARKER) ||
     h.url?.startsWith(HOOK_URL_PREFIX),
   )
 }
