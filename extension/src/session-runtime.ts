@@ -21,6 +21,7 @@ export interface SessionLifecycleEvent {
   type: 'started' | 'ended' | 'updated'
   sessionId: string
   label: string
+  workspace?: string
 }
 
 /** Interface every runtime's watcher implements. Uses portable typed-event
@@ -103,6 +104,7 @@ export function wireWatcherToPanel(
           status: 'active',
           startTime: Date.now(),
           lastActivityTime: Date.now(),
+          workspace: lifecycle.workspace,
         },
       })
     } else if (lifecycle.type === 'updated') {

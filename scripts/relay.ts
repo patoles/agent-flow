@@ -445,10 +445,10 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   // wiring both would double-broadcast session-started to SSE clients.
   let codexWatcher: CodexSessionWatcher | null = null
   if (wantCodex) {
-    codexWatcher = new CodexSessionWatcher(workspace)
+    codexWatcher = new CodexSessionWatcher(workspace, { loadAllSessions })
     codexWatcher.onEvent((event) => broadcastEvent(event))
     codexWatcher.onSessionLifecycle((lifecycle) => {
-      broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label)
+      broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label, lifecycle.workspace)
     })
     codexWatcher.start()
   }

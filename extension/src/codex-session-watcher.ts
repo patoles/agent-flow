@@ -40,6 +40,7 @@ const SESSION_ID_FROM_FILENAME = /rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([
 interface WatchedCodexSession {
   sessionId: string
   filePath: string
+  workspace?: string
   fileWatcher: fs.FSWatcher | null
   pollTimer: NodeJS.Timeout | null
   inactivityTimer: NodeJS.Timeout | null
@@ -56,12 +57,20 @@ interface WatchedCodexSession {
   parser: CodexRolloutParser
 }
 
+interface CodexSessionWatcherOptions {
+  loadAllSessions?: boolean
+}
+
 function codexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
 }
 
 function sessionsRoot(): string {
   return path.join(codexHome(), 'sessions')
+}
+
+function encodeWorkspacePath(workspacePath: string): string {
+  return workspacePath.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
 /** Walk the past SCAN_DAYS of sessions/YYYY/MM/DD directories relative to `now`.
@@ -134,7 +143,10 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
   /** Workspace path used as a cwd filter — Codex sessions are attached only if
    *  their session_meta.cwd matches this path (or is under it). Pass null/undefined
    *  to attach to any Codex session (useful when no workspace is open). */
-  constructor(private readonly workspace?: string | null) {}
+  constructor(
+    private readonly workspace?: string | null,
+    private readonly options: CodexSessionWatcherOptions = {},
+  ) {}
 
   isActive(): boolean {
     for (const s of this.sessions.values()) {
@@ -155,6 +167,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
       status: s.sessionCompleted ? 'completed' : 'active',
       startTime: s.sessionStartTime,
       lastActivityTime: s.lastActivityTime,
+      workspace: s.workspace,
     }))
   }
 
@@ -162,7 +175,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     for (const [id, session] of this.sessions) {
       if (!session.sessionDetected) continue
       if (sessionIds && !sessionIds.includes(id)) continue
-      this._onSessionLifecycle.fire({ type: 'started', sessionId: id, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'started', sessionId: id, label: session.label, workspace: session.workspace })
     }
   }
 
@@ -214,17 +227,17 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
         try { stat = fs.statSync(filePath) } catch { continue }
         if (stat.size === 0) continue
         const ageS = (Date.now() - stat.mtimeMs) / 1000
-        if (ageS > ACTIVE_SESSION_AGE_S) continue
+        if (!this.options.loadAllSessions && ageS > ACTIVE_SESSION_AGE_S) continue
+
+        const cwd = readSessionCwd(filePath)
+        const resolvedCwd = cwd ? this.resolvePath(cwd) : null
 
         // Workspace filter — only attach if cwd matches (or no workspace set)
         if (this.workspacePath) {
-          const cwd = readSessionCwd(filePath)
-          if (cwd === null) continue
-          const resolvedCwd = this.resolvePath(cwd)
           if (!resolvedCwd || !this.pathMatchesWorkspace(resolvedCwd)) continue
         }
 
-        this.attachSession(filePath, stat)
+        this.attachSession(filePath, stat, resolvedCwd ? encodeWorkspacePath(resolvedCwd) : undefined)
       }
     }
   }
@@ -244,7 +257,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     return p.startsWith(this.workspacePath + path.sep)
   }
 
-  private attachSession(filePath: string, stat: fs.Stats): void {
+  private attachSession(filePath: string, stat: fs.Stats, workspace?: string): void {
     const sessionId = this.sessionIdFor(filePath)
     const label = `Codex ${sessionId.slice(0, SESSION_ID_DISPLAY)}`
 
@@ -260,13 +273,14 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
         const s = this.sessions.get(sessionId)
         if (!s || !s.label.startsWith('Codex ')) return // only replace auto-label
         s.label = newLabel
-        this._onSessionLifecycle.fire({ type: 'updated', sessionId, label: newLabel })
+        this._onSessionLifecycle.fire({ type: 'updated', sessionId, label: newLabel, workspace: s.workspace })
       },
     })
 
     const session: WatchedCodexSession = {
       sessionId,
       filePath,
+      workspace,
       fileWatcher: null,
       pollTimer: null,
       inactivityTimer: null,
@@ -287,7 +301,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
 
     session.sessionDetected = true
     this._onSessionDetected.fire(sessionId)
-    this._onSessionLifecycle.fire({ type: 'started', sessionId, label })
+    this._onSessionLifecycle.fire({ type: 'started', sessionId, label, workspace })
 
     try {
       session.fileWatcher = fs.watch(filePath, () => this.readNewLines(sessionId))
@@ -314,7 +328,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     // new content means the user resumed the Codex CLI.
     if (session.sessionCompleted) {
       session.sessionCompleted = false
-      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label, workspace: session.workspace })
       log.info(`Session ${sessionId.slice(0, SESSION_ID_DISPLAY)} re-activated after idle`)
     }
 
@@ -339,7 +353,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
         payload: { name: ORCHESTRATOR_NAME, sessionEnd: true },
         sessionId,
       })
-      this._onSessionLifecycle.fire({ type: 'ended', sessionId, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'ended', sessionId, label: session.label, workspace: session.workspace })
     }, INACTIVITY_TIMEOUT_MS)
   }
 
