@@ -57,6 +57,7 @@ export interface ConversationMessage {
   type: 'tool_call' | 'tool_result' | 'assistant' | 'user' | 'thinking'
   content: string
   timestamp: number
+  runtime?: Agent['runtime']
   toolName?: string
   inputData?: Record<string, unknown>
 }

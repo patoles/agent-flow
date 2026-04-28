@@ -214,9 +214,12 @@ export function AgentVisualizer() {
   // Only compute when the transcript panel is visible to avoid O(n log n) sort every frame
   const sessionConversation = useMemo(() => {
     if (!showTranscript) return []
-    const all = Array.from(conversations.values()).flat()
+    const all = Array.from(conversations.entries()).flatMap(([agentId, msgs]) => {
+      const runtime = agents.get(agentId)?.runtime
+      return msgs.map(msg => msg.runtime ? msg : { ...msg, runtime })
+    })
     return all.sort((a, b) => a.timestamp - b.timestamp)
-  }, [conversations, showTranscript])
+  }, [agents, conversations, showTranscript])
 
   // Context menu items
   const contextMenuItems = selection.contextMenu ? (
@@ -326,6 +329,7 @@ export function AgentVisualizer() {
         visible={!!selectedAgent}
         agentName={selectedAgent?.name ?? ''}
         agentState={selectedAgent?.state ?? 'idle'}
+        agentRuntime={selectedAgent?.runtime}
         conversation={selectedConversation}
         onClose={selection.clearAgent}
       />
