@@ -89,6 +89,7 @@ export function handleToolCallStart(
 
     appendConversation(state.conversations, agentName, {
       type: 'tool_call', content: `> ${toolName} ${args}`, timestamp: currentTime,
+      runtime: agent.runtime,
       toolName, inputData,
     })
   }
@@ -166,6 +167,7 @@ export function handleToolCallEnd(
       type: 'tool_result',
       content: `< ${result}${tokenCost ? ` (${tokenCost} tokens)` : ''}`,
       timestamp: currentTime,
+      runtime: agent.runtime,
       toolName,
     })
   }

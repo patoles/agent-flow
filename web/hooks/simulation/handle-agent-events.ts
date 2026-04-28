@@ -30,6 +30,7 @@ export function handleAgentSpawn(
       state: 'idle',
       ...(task ? { task } : {}),
       ...(model ? { tokensMax: ctx.getContextWindowSize(model) } : {}),
+      ...(runtime ? { runtime } : {}),
     })
     return
   }

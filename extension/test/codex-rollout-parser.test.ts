@@ -93,6 +93,15 @@ describe('CodexRolloutParser', () => {
     assert.equal(thinking[0].payload.content, '**Planning directory listing**')
   })
 
+  it('tags Codex transcript messages with the codex runtime', () => {
+    const { events } = runFixture()
+    const messages = events.filter(e => e.type === 'message')
+    assert.ok(messages.length > 0)
+    for (const event of messages) {
+      assert.equal(event.payload.runtime, 'codex')
+    }
+  })
+
   it('pairs function_call with function_call_output by call_id', () => {
     const { events, state } = runFixture()
     const starts = events.filter(e => e.type === 'tool_call_start' && e.payload.tool === 'exec_command')
