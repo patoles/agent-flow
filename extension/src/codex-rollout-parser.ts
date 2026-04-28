@@ -386,6 +386,7 @@ export class CodexRolloutParser {
         agent: ORCHESTRATOR_NAME,
         role,
         content: text.slice(0, MESSAGE_MAX),
+        runtime: 'codex',
       },
     })
     this.emitContextUpdate(state)
@@ -575,6 +576,7 @@ export class CodexRolloutParser {
         agent: ORCHESTRATOR_NAME,
         role: 'thinking',
         content: text.slice(0, MESSAGE_MAX),
+        runtime: 'codex',
       },
     })
     this.emitContextUpdate(state)

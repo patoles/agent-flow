@@ -11,6 +11,11 @@ export function handleMessage(
   const agentName = asString(payload.agent)
   const content = asString(payload.content)
   const role = typeof payload.role === 'string' ? payload.role : undefined
+  const payloadRuntime = payload.runtime === 'codex'
+    ? 'codex' as const
+    : payload.runtime === 'claude'
+      ? 'claude' as const
+      : undefined
 
   // Map role to conversation message type
   const msgType: ConversationMessage['type'] =
@@ -49,12 +54,15 @@ export function handleMessage(
         updates.state = 'thinking'
       }
     }
+    if (payloadRuntime && msgAgent.runtime !== payloadRuntime) {
+      updates.runtime = payloadRuntime
+    }
     if (Object.keys(updates).length > 0) {
       state.agents.set(agentName, { ...msgAgent, ...updates })
     }
   }
 
-  appendConversation(state.conversations, agentName, { type: msgType, content, timestamp: currentTime })
+  appendConversation(state.conversations, agentName, { type: msgType, content, timestamp: currentTime, runtime: payloadRuntime ?? msgAgent?.runtime })
 }
 
 export function handleContextUpdate(

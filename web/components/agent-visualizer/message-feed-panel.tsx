@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Agent, Z, type AgentState } from '@/lib/agent-types'
+import { getMessageSenderLabel } from '@/lib/agent-runtime'
 import { COLORS, ROLE_COLORS, getStateColor } from '@/lib/colors'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { useClickOutside } from '@/hooks/use-click-outside'
@@ -285,6 +286,7 @@ export function MessageFeedPanel({
                       message={msg}
                       agentId={msg.agentId}
                       agentName={agents.get(msg.agentId)?.name ?? msg.agentId}
+                      agentRuntime={msg.runtime ?? agents.get(msg.agentId)?.runtime}
                       showAgent={activeTab === 'all'}
                       isSelected={selectedAgentId === msg.agentId}
                       onClick={() => { onAgentClick(msg.agentId); setExpanded(false) }}
@@ -332,10 +334,11 @@ function TabButton({ label, active, onClick, color, hasUnread }: {
 
 // ── Message Row ──
 
-function MessageRow({ message, agentId, agentName, showAgent, isSelected, onClick }: {
+function MessageRow({ message, agentId, agentName, agentRuntime, showAgent, isSelected, onClick }: {
   message: ConversationMessage
   agentId: string
   agentName: string
+  agentRuntime?: Agent['runtime']
   showAgent: boolean
   isSelected: boolean
   onClick: () => void
@@ -357,7 +360,7 @@ function MessageRow({ message, agentId, agentName, showAgent, isSelected, onClic
       {/* Header row */}
       <div className="flex items-center gap-1.5 mb-0.5">
         <span className="text-[9px] font-mono font-semibold" style={{ color: role.text + '90' }}>
-          {role.label}
+          {getMessageSenderLabel(message.type, message.runtime ?? agentRuntime)}
         </span>
         {showAgent && (
           <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}>
