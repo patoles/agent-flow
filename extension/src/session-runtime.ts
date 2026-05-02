@@ -15,7 +15,7 @@ import { VisualizerPanel } from './webview-provider'
 import { SESSION_ID_DISPLAY, STATUS_MESSAGE_DURATION_MS } from './constants'
 import type { TypedDisposable, TypedEvent } from './typed-event-emitter'
 
-export type AgentRuntimeMode = 'claude' | 'codex'
+export type AgentRuntimeMode = 'claude' | 'codex' | 'strands'
 
 export interface SessionLifecycleEvent {
   type: 'started' | 'ended' | 'updated'
