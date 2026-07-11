@@ -28,6 +28,11 @@ export interface SubagentWatcherDelegate extends PermissionDetectionDelegate {
 /**
  * Read the .meta.json sidecar file to resolve the subagent's name.
  * Falls back to generateSubagentFallbackName if the meta file is missing or unreadable.
+ *
+ * For agents that carry no descriptive name in their meta (e.g. Workflow
+ * subagents, whose meta is just `{"agentType":"workflow-subagent"}`), we derive
+ * a stable name from the transcript file's own id (agent-<hash>.jsonl) so each
+ * one renders as a distinct node instead of colliding on a generic label.
  */
 function resolveNameFromMeta(jsonlPath: string, fallbackIndex: number): string {
   const metaPath = jsonlPath.replace(/\.jsonl$/, '.meta.json')
@@ -37,7 +42,30 @@ function resolveNameFromMeta(jsonlPath: string, fallbackIndex: number): string {
     const name = resolveSubagentChildName(meta)
     if (name && name !== 'subagent') return name
   } catch { /* meta file may not exist for older Claude Code versions */ }
-  return generateSubagentFallbackName('', fallbackIndex)
+  // Derive a stable id from the filename (e.g. "agent-a0fb14872db487d5b") so
+  // workflow subagents that share an undescriptive meta still get unique names.
+  const fileId = path.basename(jsonlPath, '.jsonl')
+  return generateSubagentFallbackName(fileId, fallbackIndex)
+}
+
+/** Recursively collect every *.jsonl transcript under a subagents directory.
+ *  Newer Claude Code nests Workflow subagents under
+ *  `subagents/workflows/wf_<id>/agent-*.jsonl`, so a flat readdir misses them. */
+export function collectSubagentJsonlFiles(dir: string): string[] {
+  const found: string[] = []
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch { return found }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      found.push(...collectSubagentJsonlFiles(full))
+    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      found.push(full)
+    }
+  }
+  return found
 }
 
 /** Scan the subagents directory for new JSONL files and start tailing them */
@@ -49,23 +77,27 @@ export function scanSubagentsDir(
   const session = delegate.getSession(sessionId)
   if (!session || !session.subagentsDir) return
 
-  // Start watching the directory itself once it exists
+  // Start watching the directory tree once it exists. Try a recursive watch
+  // first (supported on Windows/macOS) so nested workflow subagent files are
+  // detected promptly; fall back to a flat watch on platforms without recursive
+  // support (Linux). Either way the POLL_FALLBACK_MS poll re-scans recursively.
   if (!session.subagentsDirWatcher && fs.existsSync(session.subagentsDir)) {
+    const onChange = () => scanSubagentsDir(delegate, parser, sessionId)
     try {
-      session.subagentsDirWatcher = fs.watch(session.subagentsDir, () => {
-        scanSubagentsDir(delegate, parser, sessionId)
-      })
-    } catch (err) { log.debug('Subagent dir watch failed:', err) }
+      session.subagentsDirWatcher = fs.watch(session.subagentsDir, { recursive: true }, onChange)
+    } catch {
+      try {
+        session.subagentsDirWatcher = fs.watch(session.subagentsDir, onChange)
+      } catch (err) { log.debug('Subagent dir watch failed:', err) }
+    }
   }
 
   const subDir = session.subagentsDir
   if (!fs.existsSync(subDir)) return
 
   try {
-    const files = fs.readdirSync(subDir)
-    for (const file of files) {
-      if (!file.endsWith('.jsonl')) continue
-      const filePath = path.join(subDir, file)
+    // Recurse — Workflow subagents live under subagents/workflows/wf_<id>/.
+    for (const filePath of collectSubagentJsonlFiles(subDir)) {
       if (session.subagentWatchers.has(filePath)) continue
       startWatchingSubagentFile(delegate, parser, filePath, sessionId)
     }
