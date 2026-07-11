@@ -1,0 +1,10 @@
+{"time":0,"type":"agent_spawn","payload":{"name":"orchestrator","isMain":true,"task":"Strands session","runtime":"strands","cwd":"/tmp/test-workspace"},"sessionId":"test-strands-session"}
+{"time":0.5,"type":"agent_idle","payload":{"name":"orchestrator"},"sessionId":"test-strands-session"}
+{"time":2.1,"type":"tool_call_start","payload":{"agent":"orchestrator","tool":"list_files","args":".","preview":"list_files: .","inputData":{"directory":"."}},"sessionId":"test-strands-session"}
+{"time":2.6,"type":"tool_call_end","payload":{"agent":"orchestrator","tool":"list_files","result":"file1.py\nfile2.py","tokenCost":0,"discovery":{"id":"list_files-.","type":"file","label":".","content":"file1.py\nfile2.py"}},"sessionId":"test-strands-session"}
+{"time":2.8,"type":"agent_idle","payload":{"name":"orchestrator"},"sessionId":"test-strands-session"}
+{"time":4.5,"type":"tool_call_start","payload":{"agent":"orchestrator","tool":"read_file","args":"file1.py","preview":"read_file: file1.py","inputData":{"file_path":"file1.py"},"filePath":"file1.py"},"sessionId":"test-strands-session"}
+{"time":5.0,"type":"tool_call_end","payload":{"agent":"orchestrator","tool":"read_file","result":"print('hello')","tokenCost":0,"discovery":{"id":"read_file-file1.py","type":"file","label":"file1.py","content":"print('hello')"}},"sessionId":"test-strands-session"}
+{"time":5.2,"type":"context_update","payload":{"agent":"orchestrator","tokens":15000,"breakdown":{"systemPrompt":0,"userMessages":0,"toolResults":0,"reasoning":0,"subagentResults":0},"tokensMax":200000,"isAuthoritative":true},"sessionId":"test-strands-session"}
+{"time":5.4,"type":"message","payload":{"agent":"orchestrator","role":"user","content":"List and read files"},"sessionId":"test-strands-session"}
+{"time":8.0,"type":"agent_complete","payload":{"name":"orchestrator","sessionEnd":true},"sessionId":"test-strands-session"}
