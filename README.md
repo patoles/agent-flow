@@ -48,7 +48,8 @@ git clone https://github.com/patoles/agent-flow.git
 cd agent-flow
 pnpm i
 pnpm run setup      # configure Claude Code hooks (one-time)
-pnpm run dev        # start the web app + event relay
+pnpm dev            # start the web app + event relay for this repository
+pnpm dev -- /path/to/workspace  # watch a specific workspace instead
 ```
 
 Open http://localhost:3000 and start a Claude Code session in another terminal — events will stream to the browser in real-time.
@@ -115,10 +116,11 @@ You can also point Agent Flow at a JSONL event log file:
 ```bash
 pnpm i              # install dependencies for all packages
 pnpm run setup      # configure Claude Code hooks (one-time)
-pnpm run dev        # start dev server + event relay
+pnpm dev            # start dev server + event relay for this repository
+pnpm dev -- /path/to/workspace  # watch a specific workspace instead
 ```
 
-`pnpm run dev` starts both the Next.js dev server and an event relay that receives Claude Code events and streams them to the browser via SSE.
+`pnpm dev` starts both the Next.js dev server and an event relay that receives Claude Code events and streams them to the browser via SSE. With no argument, it watches this repository. To watch another directory, run `pnpm dev -- <directory>`; relative paths are resolved from the directory where you run the command, and absolute paths are also accepted. The command exits before starting either service if the path is missing, is a file, or if more than one path is supplied.
 
 Other scripts:
 

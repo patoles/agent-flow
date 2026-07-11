@@ -5,10 +5,11 @@
  */
 import * as http from 'http'
 import { createRelay } from './relay'
+import { resolveRelayWorkspace } from './relay-workspace'
 import { DEFAULT_RELAY_PORT, DEV_WEB_ORIGIN_PATTERN } from '../extension/src/constants'
 
 async function main() {
-  const workspace = process.argv[2] || process.cwd()
+  const workspace = resolveRelayWorkspace(process.argv.slice(2))
 
   console.log('Starting Agent Flow dev relay...\n')
   console.log(`Workspace: ${workspace}`)
