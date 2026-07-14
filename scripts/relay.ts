@@ -12,7 +12,7 @@ import { HookServer } from '../extension/src/hook-server'
 import { AgentEvent, SessionInfo, WatchedSession } from '../extension/src/protocol'
 import { TranscriptParser } from '../extension/src/transcript-parser'
 import { readNewFileLines } from '../extension/src/fs-utils'
-import { scanSubagentsDir, readSubagentNewLines } from '../extension/src/subagent-watcher'
+import { scanSubagentsDir, readSubagentNewLines, newestSubagentMtime } from '../extension/src/subagent-watcher'
 import { handlePermissionDetection } from '../extension/src/permission-detection'
 import { CodexSessionWatcher } from '../extension/src/codex-session-watcher'
 import {
@@ -146,6 +146,7 @@ const parser = new TranscriptParser({
   getSession: (sessionId: string) => sessions.get(sessionId),
   fireSessionLifecycle: (event) => broadcastSessionLifecycle(event.type, event.sessionId, event.label),
   emitContextUpdate,
+  scanSubagents: (sessionId: string) => scanSubagentsDir(watcherDelegate, parser, sessionId),
 })
 
 const watcherDelegate = {
@@ -296,17 +297,14 @@ function scanForActiveSessions(workspace: string) {
         const stat = fs.statSync(filePath)
         const sessionId = path.basename(file, '.jsonl')
 
+        // Subagent writes (including nested workflows/wf_*/ files) keep a
+        // session alive when the main JSONL is stale. Only walk the tree when
+        // the main file alone doesn't qualify.
         let newestMtime = stat.mtimeMs
-        const subagentsDir = path.join(dirPath, sessionId, 'subagents')
-        try {
-          if (fs.existsSync(subagentsDir)) {
-            for (const subFile of fs.readdirSync(subagentsDir)) {
-              if (!subFile.endsWith('.jsonl')) continue
-              const subStat = fs.statSync(path.join(subagentsDir, subFile))
-              if (subStat.mtimeMs > newestMtime) newestMtime = subStat.mtimeMs
-            }
-          }
-        } catch {}
+        if ((Date.now() - newestMtime) / 1000 > ACTIVE_SESSION_AGE_S) {
+          const subMtime = newestSubagentMtime(path.join(dirPath, sessionId, 'subagents'))
+          if (subMtime > newestMtime) newestMtime = subMtime
+        }
 
         const ageSeconds = (Date.now() - newestMtime) / 1000
         if (ageSeconds <= ACTIVE_SESSION_AGE_S && !sessions.has(sessionId)) {

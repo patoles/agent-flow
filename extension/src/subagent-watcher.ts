@@ -12,7 +12,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { AgentEvent, SubagentState, WatchedSession, emitSubagentSpawn } from './protocol'
-import { SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, generateSubagentFallbackName, resolveSubagentChildName } from './constants'
+import { SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, SUBAGENT_ID_SUFFIX_LENGTH, generateSubagentFallbackName, resolveSubagentChildName } from './constants'
 import { readNewFileLines } from './fs-utils'
 import { TranscriptParser } from './transcript-parser'
 import { handlePermissionDetection, PermissionDetectionDelegate } from './permission-detection'
@@ -36,16 +36,22 @@ export interface SubagentWatcherDelegate extends PermissionDetectionDelegate {
  */
 function resolveNameFromMeta(jsonlPath: string, fallbackIndex: number): string {
   const metaPath = jsonlPath.replace(/\.jsonl$/, '.meta.json')
+  // Stable id from the filename, e.g. "agent-a0fb14872db487d5b" → "a0fb14872db487d5b"
+  const fileId = path.basename(jsonlPath, '.jsonl')
+  const agentId = fileId.replace(/^agent-/, '')
   try {
     const raw = fs.readFileSync(metaPath, 'utf-8')
     const meta = JSON.parse(raw) as Record<string, unknown>
     const name = resolveSubagentChildName(meta)
     if (name && name !== 'subagent') return name
+    // No descriptive name (e.g. Workflow subagents: {"agentType":"workflow-subagent"}).
+    // Use the same `<agentType>-<id suffix>` convention as the SubagentStop hook
+    // (hook-server.ts) so hook-emitted completion events resolve to this node.
+    if (typeof meta.agentType === 'string' && meta.agentType) {
+      return `${meta.agentType}-${agentId.slice(-SUBAGENT_ID_SUFFIX_LENGTH)}`
+    }
   } catch { /* meta file may not exist for older Claude Code versions */ }
-  // Derive a stable id from the filename (e.g. "agent-a0fb14872db487d5b") so
-  // workflow subagents that share an undescriptive meta still get unique names.
-  const fileId = path.basename(jsonlPath, '.jsonl')
-  return generateSubagentFallbackName(fileId, fallbackIndex)
+  return generateSubagentFallbackName(agentId, fallbackIndex)
 }
 
 /** Recursively collect every *.jsonl transcript under a subagents directory.
@@ -66,6 +72,34 @@ export function collectSubagentJsonlFiles(dir: string): string[] {
     }
   }
   return found
+}
+
+/** Newest mtime (ms) across every *.jsonl under a subagents directory, recursively.
+ *  Used for session-liveness checks: a session whose main transcript is stale may
+ *  still be running Workflow subagents that only write under
+ *  `subagents/workflows/wf_<id>/`. Deliberately includes non-agent files like the
+ *  workflow `journal.jsonl` — during a run it is often the most recently written
+ *  file, and any write under the tree means the session is alive.
+ *  Returns 0 if the directory is missing or has no .jsonl files. */
+export function newestSubagentMtime(dir: string): number {
+  let newest = 0
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch { return newest }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      const sub = newestSubagentMtime(full)
+      if (sub > newest) newest = sub
+    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      try {
+        const mt = fs.statSync(full).mtimeMs
+        if (mt > newest) newest = mt
+      } catch { /* file may vanish mid-scan */ }
+    }
+  }
+  return newest
 }
 
 /** Scan the subagents directory for new JSONL files and start tailing them */
@@ -126,6 +160,7 @@ function startWatchingSubagentFile(
     permissionTimer: null,
     permissionEmitted: false,
     spawnEmitted: false,
+    completed: false,
   }
   session.subagentWatchers.set(filePath, state)
 
@@ -206,6 +241,14 @@ export function readSubagentNewLines(
       session.spawnedSubagents.add(state.agentName)
       emitSubagentSpawn(delegate, ORCHESTRATOR_NAME, state.agentName, state.agentName, sessionId)
     }
+  }
+
+  // Node was completed (e.g. by its Workflow tool_result) but the transcript is
+  // being written again — a resumed run. Revive it, mirroring how the
+  // orchestrator node is resurrected in resetInactivityTimer.
+  if (state.completed) {
+    state.completed = false
+    emitSubagentSpawn(delegate, ORCHESTRATOR_NAME, state.agentName, state.agentName, sessionId)
   }
 
   for (const line of result.lines) {

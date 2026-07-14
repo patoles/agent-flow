@@ -11,7 +11,7 @@ import type { AgentSessionWatcher, SessionLifecycleEvent } from './session-runti
 import { TranscriptParser } from './transcript-parser'
 import { readNewFileLines } from './fs-utils'
 import { handlePermissionDetection } from './permission-detection'
-import { scanSubagentsDir, readSubagentNewLines } from './subagent-watcher'
+import { scanSubagentsDir, readSubagentNewLines, newestSubagentMtime } from './subagent-watcher'
 import { createLogger } from './logger'
 
 const log = createLogger('SessionWatcher')
@@ -60,6 +60,7 @@ export class SessionWatcher implements AgentSessionWatcher {
     getSession: (sessionId) => this.sessions.get(sessionId),
     fireSessionLifecycle: (event) => this._onSessionLifecycle.fire(event),
     emitContextUpdate: (agentName, session, sessionId) => this.emitContextUpdate(agentName, session, sessionId),
+    scanSubagents: (sessionId) => scanSubagentsDir(this.selfDelegate, this.parser, sessionId),
   })
 
   /** Delegate for subagent/permission modules to call back into this watcher */
@@ -309,19 +310,16 @@ export class SessionWatcher implements AgentSessionWatcher {
             const stat = fs.statSync(filePath)
             let newestMtime = stat.mtimeMs
 
-            // Also check subagent files — a session's main JSONL may be stale
-            // while subagents are still actively writing.
+            // Also check subagent files (recursively — Workflow subagents write
+            // under subagents/workflows/wf_<id>/) — a session's main JSONL may
+            // be stale while subagents are still actively writing. Only walk
+            // the tree when the main file alone doesn't qualify, since subagent
+            // mtimes can only make the session newer.
             const sessionId = path.basename(file, '.jsonl')
-            const subagentsDir = path.join(projectPath, sessionId, 'subagents')
-            try {
-              if (fs.existsSync(subagentsDir)) {
-                for (const subFile of fs.readdirSync(subagentsDir)) {
-                  if (!subFile.endsWith('.jsonl')) continue
-                  const subStat = fs.statSync(path.join(subagentsDir, subFile))
-                  if (subStat.mtimeMs > newestMtime) newestMtime = subStat.mtimeMs
-                }
-              }
-            } catch { /* expected if subagents dir doesn't exist yet */ }
+            if ((Date.now() - newestMtime) / 1000 > ACTIVE_SESSION_AGE_S) {
+              const subMtime = newestSubagentMtime(path.join(projectPath, sessionId, 'subagents'))
+              if (subMtime > newestMtime) newestMtime = subMtime
+            }
 
             const ageSeconds = (Date.now() - newestMtime) / 1000
             if (ageSeconds <= ACTIVE_SESSION_AGE_S) {
@@ -514,17 +512,8 @@ export class SessionWatcher implements AgentSessionWatcher {
   private newestMtime(filePath: string, sessionId: string): number {
     let newest: number
     try { newest = fs.statSync(filePath).mtimeMs } catch { return Date.now() }
-    const subDir = path.join(path.dirname(filePath), sessionId, 'subagents')
-    try {
-      if (fs.existsSync(subDir)) {
-        for (const f of fs.readdirSync(subDir)) {
-          if (!f.endsWith('.jsonl')) continue
-          const mt = fs.statSync(path.join(subDir, f)).mtimeMs
-          if (mt > newest) newest = mt
-        }
-      }
-    } catch { /* expected if subagents dir doesn't exist yet */ }
-    return newest
+    const subMtime = newestSubagentMtime(path.join(path.dirname(filePath), sessionId, 'subagents'))
+    return subMtime > newest ? subMtime : newest
   }
 
   private elapsed(sessionId?: string): number {

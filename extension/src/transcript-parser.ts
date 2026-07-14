@@ -5,6 +5,7 @@
  * keeping the parsing logic decoupled from file-watching concerns.
  */
 
+import * as path from 'path'
 import {
   AgentEvent, PendingToolCall, WatchedSession,
   TranscriptEntry, ToolUseBlock, ToolResultBlock,
@@ -34,6 +35,10 @@ export interface TranscriptParserDelegate {
   getSession(sessionId: string): WatchedSession | undefined
   fireSessionLifecycle(event: { type: 'started' | 'ended' | 'updated'; sessionId: string; label: string }): void
   emitContextUpdate(agentName: string, session: WatchedSession, sessionId?: string): void
+  /** Re-scan the session's subagents directory for not-yet-tailed transcripts.
+   *  Used when a Workflow tool_result arrives, so nested files written after
+   *  the last scan are picked up before their nodes are completed. */
+  scanSubagents?(sessionId: string): void
 }
 
 /** Type guard: check if a value is a non-null object */
@@ -353,6 +358,12 @@ export class TranscriptParser {
       }, sessionId)
     }
 
+    // A Workflow run finishing: its subagents live under subagents/workflows/
+    // and never produce Task/Agent tool_results, so complete their nodes now.
+    if (toolName === 'Workflow') {
+      this.completeWorkflowSubagents(agentName, sessionId)
+    }
+
     // Detect errors in tool output
     const isError = detectError(result)
     const errorMessage = isError ? result.slice(0, FAILED_RESULT_MAX) : undefined
@@ -374,6 +385,46 @@ export class TranscriptParser {
     if (sessionId) {
       const session = this.delegate.getSession(sessionId)
       if (session) { this.delegate.emitContextUpdate(agentName, session, sessionId) }
+    }
+  }
+
+  /**
+   * Emit subagent_return + agent_complete for file-tailed Workflow subagents
+   * once their Workflow tool call returns. Workflow runs don't spawn via the
+   * Task/Agent tools, so the tool_result completion path above never fires for
+   * them and their nodes would otherwise stay "running" for the whole session.
+   *
+   * The Workflow tool result does not reliably carry the wf_<id> run id (the
+   * "Run ID:" line is conditional, and absent entirely for remote launches),
+   * so instead of parsing ids out of result text we complete every
+   * workflow-path subagent that is idle. Agents belonging to a still-running
+   * concurrent Workflow are mid-tool — they hold unmatched pending tool calls
+   * — and are left alone.
+   */
+  private completeWorkflowSubagents(parentName: string, sessionId?: string): void {
+    if (!sessionId) return
+    // Pick up nested transcripts written since the last directory scan — the
+    // flat fs.watch fallback (Linux/Node 18 hosts) can't see writes below
+    // workflows/, so discovery may lag behind the Workflow's completion.
+    this.delegate.scanSubagents?.(sessionId)
+    const session = this.delegate.getSession(sessionId)
+    if (!session) return
+    const marker = `${path.sep}workflows${path.sep}`
+    for (const [filePath, state] of session.subagentWatchers) {
+      if (!filePath.includes(marker)) continue
+      if (!state.spawnEmitted || state.completed) continue
+      if (state.pendingToolCalls.size > 0) continue
+      state.completed = true
+      this.delegate.emit({
+        time: this.delegate.elapsed(sessionId),
+        type: 'subagent_return',
+        payload: { child: state.agentName, parent: parentName, summary: 'workflow run finished' },
+      }, sessionId)
+      this.delegate.emit({
+        time: this.delegate.elapsed(sessionId),
+        type: 'agent_complete',
+        payload: { name: state.agentName },
+      }, sessionId)
     }
   }
 

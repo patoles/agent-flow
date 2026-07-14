@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { collectSubagentJsonlFiles } from '../src/subagent-watcher'
+import { collectSubagentJsonlFiles, newestSubagentMtime } from '../src/subagent-watcher'
 
 describe('collectSubagentJsonlFiles', () => {
   let root: string
@@ -53,5 +53,53 @@ describe('collectSubagentJsonlFiles', () => {
 
   it('returns an empty array for a missing directory instead of throwing', () => {
     assert.deepEqual(collectSubagentJsonlFiles(path.join(root, 'does-not-exist')), [])
+  })
+})
+
+describe('newestSubagentMtime', () => {
+  let root: string
+  const HOUR = 60 * 60
+
+  before(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-flow-mtime-'))
+    const now = Math.floor(Date.now() / 1000)
+    // Flat subagent transcript — stale (2h old).
+    const flat = path.join(root, 'agent-flat.jsonl')
+    fs.writeFileSync(flat, '')
+    fs.utimesSync(flat, now - 2 * HOUR, now - 2 * HOUR)
+    // Nested workflow journal — the freshest .jsonl write. During a workflow
+    // run this is often the only recently-touched file, so session-liveness
+    // checks must see it.
+    const wfDir = path.join(root, 'workflows', 'wf_f76aef6d-59e')
+    fs.mkdirSync(wfDir, { recursive: true })
+    const journal = path.join(wfDir, 'journal.jsonl')
+    fs.writeFileSync(journal, '')
+    fs.utimesSync(journal, now - HOUR, now - HOUR)
+    const nestedAgent = path.join(wfDir, 'agent-a0fb14872db487d5b.jsonl')
+    fs.writeFileSync(nestedAgent, '')
+    fs.utimesSync(nestedAgent, now - 90 * 60, now - 90 * 60)
+    // Sidecar newer than everything — not a .jsonl, must be ignored.
+    const meta = path.join(wfDir, 'agent-a0fb14872db487d5b.meta.json')
+    fs.writeFileSync(meta, '{}')
+    fs.utimesSync(meta, now, now)
+  })
+
+  after(() => {
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  it('returns the newest nested .jsonl mtime, including journal.jsonl', () => {
+    const newest = newestSubagentMtime(root)
+    const journalMtime = fs.statSync(path.join(root, 'workflows', 'wf_f76aef6d-59e', 'journal.jsonl')).mtimeMs
+    assert.equal(newest, journalMtime)
+  })
+
+  it('ignores non-jsonl files even when they are newer', () => {
+    const metaMtime = fs.statSync(path.join(root, 'workflows', 'wf_f76aef6d-59e', 'agent-a0fb14872db487d5b.meta.json')).mtimeMs
+    assert.ok(newestSubagentMtime(root) < metaMtime)
+  })
+
+  it('returns 0 for a missing directory instead of throwing', () => {
+    assert.equal(newestSubagentMtime(path.join(root, 'does-not-exist')), 0)
   })
 })
