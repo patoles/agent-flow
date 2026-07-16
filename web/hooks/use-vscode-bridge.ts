@@ -57,6 +57,19 @@ export function useVSCodeBridge(): BridgeHookResult {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const selectedSessionIdRef = useRef<string | null>(null)
+  // Deep-link target from ?session=<id> (e.g. FleetView "expand agent"). The
+  // target session may not exist yet at page load, so we select it on arrival.
+  // Cleared once fulfilled — or when the user picks another tab — so normal
+  // auto-select resumes. Absent param → null → behaviour is unchanged.
+  const desiredSessionIdRef = useRef<string | null>(
+    typeof window !== 'undefined'
+      ? (() => {
+          const p = new URLSearchParams(window.location.search)
+          const raw = p.get('session') ?? p.get('sessionId') // accept either spelling
+          return raw && raw.trim() ? raw.trim() : null
+        })()
+      : null
+  )
   const sessionEventsRef = useRef<Map<string, SimulationEvent[]>>(new Map())
   /** True while a session switch is pending (between auto-select and useLayoutEffect).
    *  Prevents the animation frame from processing events in the wrong simulation context. */
@@ -188,13 +201,21 @@ export function useVSCodeBridge(): BridgeHookResult {
         // Auto-select: prefer active sessions, then most recently active.
         // Only set selection — useLayoutEffect handles flushing events.
         if (!selectedSessionIdRef.current && sessionList.length > 0) {
-          const sorted = [...sessionList].sort((a, b) => {
-            const aActive = a.status === 'active' ? 1 : 0
-            const bActive = b.status === 'active' ? 1 : 0
-            if (aActive !== bActive) return bActive - aActive
-            return b.lastActivityTime - a.lastActivityTime
-          })
-          const autoId = sorted[0].id
+          const desired = desiredSessionIdRef.current
+          const target = desired ? sessionList.find(s => s.id === desired) : undefined
+          let autoId: string
+          if (target) {
+            autoId = target.id
+            desiredSessionIdRef.current = null // fulfilled
+          } else {
+            const sorted = [...sessionList].sort((a, b) => {
+              const aActive = a.status === 'active' ? 1 : 0
+              const bActive = b.status === 'active' ? 1 : 0
+              if (aActive !== bActive) return bActive - aActive
+              return b.lastActivityTime - a.lastActivityTime
+            })
+            autoId = sorted[0].id
+          }
           sessionSwitchPendingRef.current = true
           pendingEventsRef.current.length = 0
           selectedSessionIdRef.current = autoId
@@ -212,13 +233,18 @@ export function useVSCodeBridge(): BridgeHookResult {
           }
           return [...prev, session]
         })
-        // Auto-select newly started session.
-        // Set switch-pending flag to prevent the animation frame from processing
-        // events in the wrong simulation state before useLayoutEffect swaps it.
-        sessionSwitchPendingRef.current = true
-        pendingEventsRef.current.length = 0
-        selectedSessionIdRef.current = session.id
-        setSelectedSessionId(session.id)
+        // Auto-select newly started session — UNLESS a deep-link target is still
+        // outstanding and this isn't it (don't steal focus from ?session=).
+        {
+          const desired = desiredSessionIdRef.current
+          if (!desired || session.id === desired) {
+            if (desired) desiredSessionIdRef.current = null // fulfilled on arrival
+            sessionSwitchPendingRef.current = true
+            pendingEventsRef.current.length = 0
+            selectedSessionIdRef.current = session.id
+            setSelectedSessionId(session.id)
+          }
+        }
       } else if (type === 'updated') {
         const { sessionId, label } = data as { sessionId: string; label: string }
         setSessions(prev => prev.map(s =>
@@ -250,6 +276,8 @@ export function useVSCodeBridge(): BridgeHookResult {
   /** Switch session selection. Does NOT flush events — call flushSessionEvents
    *  from useLayoutEffect after the simulation state has been saved/swapped. */
   const selectSession = useCallback((sessionId: string | null) => {
+    // User override wins: drop any outstanding deep-link target.
+    desiredSessionIdRef.current = null
     // Block event delivery to pending until the simulation state is swapped
     sessionSwitchPendingRef.current = true
     pendingEventsRef.current.length = 0
