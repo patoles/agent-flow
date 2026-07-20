@@ -52,6 +52,7 @@ interface WatchedCodexSession {
   sessionDetected: boolean
   sessionCompleted: boolean
   label: string
+  cwd: string | null
   rolloutState: CodexRolloutState
   parser: CodexRolloutParser
 }
@@ -170,6 +171,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
       status: s.sessionCompleted ? 'completed' : 'active',
       startTime: s.sessionStartTime,
       lastActivityTime: s.lastActivityTime,
+      ...(s.cwd ? { cwd: s.cwd } : {}),
     }))
   }
 
@@ -177,7 +179,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     for (const [id, session] of this.sessions) {
       if (!session.sessionDetected) continue
       if (sessionIds && !sessionIds.includes(id)) continue
-      this._onSessionLifecycle.fire({ type: 'started', sessionId: id, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'started', sessionId: id, label: session.label, ...(session.cwd ? { cwd: session.cwd } : {}) })
     }
   }
 
@@ -313,6 +315,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
       sessionDetected: false,
       sessionCompleted: false,
       label,
+      cwd: readSessionCwd(filePath),
       rolloutState: createCodexRolloutState(),
       parser,
     }
@@ -323,7 +326,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
 
     session.sessionDetected = true
     this._onSessionDetected.fire(sessionId)
-    this._onSessionLifecycle.fire({ type: 'started', sessionId, label })
+    this._onSessionLifecycle.fire({ type: 'started', sessionId, label, ...(session.cwd ? { cwd: session.cwd } : {}) })
 
     try {
       session.fileWatcher = fs.watch(filePath, () => this.readNewLines(sessionId))

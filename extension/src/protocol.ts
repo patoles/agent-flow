@@ -34,6 +34,10 @@ export interface SessionInfo {
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number
+  /** Absolute working directory of the session, when known. Used by the UI to
+   *  group sessions by project and worktree. Absent for runtimes/transcripts
+   *  that don't expose a cwd (falls back to an "Other" group). */
+  cwd?: string
 }
 
 // ─── Extension → Webview Messages ────────────────────────────────────────────
@@ -168,6 +172,9 @@ export interface SubagentState {
 export interface WatchedSession {
   sessionId: string
   filePath: string
+  /** Working directory reported by the transcript entries, once seen. Derived
+   *  into project/worktree by the UI. */
+  cwd: string | null
   fileWatcher: import('fs').FSWatcher | null
   pollTimer: NodeJS.Timeout | null
   fileSize: number

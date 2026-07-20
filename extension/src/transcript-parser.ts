@@ -142,6 +142,13 @@ export class TranscriptParser {
 
     const session = sessionId ? this.delegate.getSession(sessionId) : undefined
 
+    // Capture the session's working directory the first time we see it — used by
+    // the UI to group sessions by project/worktree. Claude Code writes `cwd` on
+    // conversation entries.
+    if (session && !session.cwd && typeof parsed.cwd === 'string' && parsed.cwd) {
+      session.cwd = parsed.cwd
+    }
+
     // Extract model from assistant messages (updates tokensMax on the frontend).
     // Per-agent tracking: re-emit when the model changes (e.g. /model switch).
     if (session && entry.type === 'assistant' && msg.model && session.modelDetectedAgents.get(agentName) !== msg.model) {
@@ -496,6 +503,12 @@ export class TranscriptParser {
           // Extract model from first assistant message
           if (entry.type === 'assistant' && entry.message?.model && !session.model) {
             session.model = entry.message.model
+          }
+          // Capture the session's working directory (present on conversation
+          // entries) — the UI groups sessions by project/worktree from it.
+          if (!session.cwd) {
+            const cwd = (entry as unknown as { cwd?: unknown }).cwd
+            if (typeof cwd === 'string' && cwd) session.cwd = cwd
           }
           // Collect emittable entries (user and assistant turns)
           if (entry.type === 'user' || entry.type === 'assistant') {

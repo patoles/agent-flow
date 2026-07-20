@@ -21,6 +21,9 @@ export interface SessionLifecycleEvent {
   type: 'started' | 'ended' | 'updated'
   sessionId: string
   label: string
+  /** Working directory of the session, when known — lets the UI group by
+   *  project/worktree. Only meaningful on 'started'. */
+  cwd?: string
 }
 
 /** Interface every runtime's watcher implements. Uses portable typed-event
@@ -103,6 +106,7 @@ export function wireWatcherToPanel(
           status: 'active',
           startTime: Date.now(),
           lastActivityTime: Date.now(),
+          ...(lifecycle.cwd ? { cwd: lifecycle.cwd } : {}),
         },
       })
     } else if (lifecycle.type === 'updated') {

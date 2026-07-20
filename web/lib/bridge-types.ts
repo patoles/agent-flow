@@ -19,6 +19,9 @@ export interface SessionInfo {
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number
+  /** Absolute working directory of the session, when known. The UI derives a
+   *  project + worktree from it to group sessions (see lib/session-grouping). */
+  cwd?: string
 }
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'watching'

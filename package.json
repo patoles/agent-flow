@@ -12,7 +12,7 @@
     "build:webview": "pnpm --filter agent-flow-web run build:webview",
     "build:all": "pnpm run build:webview && pnpm run build:extension",
     "build:app": "node app/build.js",
-    "test": "node --import tsx --test \"scripts/**/*.test.ts\" \"app/src/**/*.test.ts\""
+    "test": "node --import tsx --test \"scripts/**/*.test.ts\" \"app/src/**/*.test.ts\" \"web/lib/**/*.test.ts\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

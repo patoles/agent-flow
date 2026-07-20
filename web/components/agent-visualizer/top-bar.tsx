@@ -5,7 +5,7 @@ import { Z } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
 import { formatTokens } from "@/lib/utils"
 import { agentCost } from "./canvas/draw-cost"
-import { SessionTabs } from "./session-tabs"
+import { SessionNav, type SessionFilter } from "./session-nav"
 import type { SessionInfo, ConnectionStatus } from "@/lib/bridge-types"
 
 // ─── Mute/Unmute SVG Icons ───────────────────────────────────────────────────
@@ -83,6 +83,9 @@ export interface TopBarProps {
   sessionsWithActivity: Set<string>
   onSelectSession: (id: string) => void
   onCloseSession: (id: string) => void
+  // Grouping filter
+  sessionFilter: SessionFilter
+  onSessionFilterChange: (filter: SessionFilter) => void
   // Connection
   isVSCode: boolean
   connectionStatus: ConnectionStatus
@@ -103,6 +106,7 @@ export interface TopBarProps {
 export const TopBar = memo(function TopBar({
   sessions, selectedSessionId, sessionsWithActivity,
   onSelectSession, onCloseSession,
+  sessionFilter, onSessionFilterChange,
   isVSCode, connectionStatus,
   agentCount, totalTokens,
   showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
@@ -110,13 +114,15 @@ export const TopBar = memo(function TopBar({
 }: TopBarProps) {
   return (
     <div className="absolute top-3 left-3 right-3 flex items-center gap-4 font-mono text-[10px]" style={{ zIndex: Z.info }}>
-      {/* Session tabs — scrollable, takes available space */}
+      {/* Session nav — grouped by project/worktree, scrollable */}
       {sessions.length > 1 && (
         <div className="min-w-0 flex-shrink overflow-x-auto scrollbar-hide">
-          <SessionTabs
+          <SessionNav
             sessions={sessions}
             selectedSessionId={selectedSessionId}
             sessionsWithActivity={sessionsWithActivity}
+            filter={sessionFilter}
+            onFilterChange={onSessionFilterChange}
             onSelectSession={onSelectSession}
             onCloseSession={onCloseSession}
           />

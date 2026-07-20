@@ -97,6 +97,7 @@ export class SessionWatcher implements AgentSessionWatcher {
       status: s.sessionCompleted ? 'completed' : 'active',
       startTime: s.sessionStartTime,
       lastActivityTime: s.lastActivityTime,
+      ...(s.cwd ? { cwd: s.cwd } : {}),
     }))
   }
 
@@ -389,6 +390,7 @@ export class SessionWatcher implements AgentSessionWatcher {
     const session: WatchedSession = {
       sessionId,
       filePath,
+      cwd: null,
       fileWatcher: null,
       pollTimer: null,
       fileSize: 0,
@@ -520,7 +522,7 @@ export class SessionWatcher implements AgentSessionWatcher {
           ...(session.model ? { model: session.model } : {}),
         },
       }, sessionId)
-      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label, ...(session.cwd ? { cwd: session.cwd } : {}) })
     }
 
     if (session.inactivityTimer) {

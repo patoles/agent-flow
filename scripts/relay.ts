@@ -100,11 +100,12 @@ function broadcastEvent(event: AgentEvent) {
   broadcast(JSON.stringify({ type: 'agent-event', event }))
 }
 
-function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessionId: string, label: string) {
+function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessionId: string, label: string, cwdHint?: string) {
   if (type === 'started') {
+    const cwd = cwdHint ?? sessions.get(sessionId)?.cwd ?? undefined
     broadcast(JSON.stringify({
       type: 'session-started',
-      session: { id: sessionId, label, status: 'active', startTime: Date.now(), lastActivityTime: Date.now() } as SessionInfo,
+      session: { id: sessionId, label, status: 'active', startTime: Date.now(), lastActivityTime: Date.now(), ...(cwd ? { cwd } : {}) } as SessionInfo,
     }))
   } else if (type === 'ended') {
     broadcast(JSON.stringify({ type: 'session-ended', sessionId }))
@@ -194,6 +195,7 @@ function watchSession(sessionId: string, filePath: string) {
   const defaultLabel = `Session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`
   const session: WatchedSession = {
     sessionId, filePath,
+    cwd: null,
     fileWatcher: null, pollTimer: null, fileSize: 0,
     sessionStartTime: Date.now(),
     pendingToolCalls: new Map(),
@@ -434,7 +436,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     codexWatcher = new CodexSessionWatcher(workspace)
     codexWatcher.onEvent((event) => broadcastEvent(event))
     codexWatcher.onSessionLifecycle((lifecycle) => {
-      broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label)
+      broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label, lifecycle.cwd)
     })
     codexWatcher.start()
   }
@@ -493,6 +495,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
           id: session.sessionId, label: session.label,
           status: session.sessionCompleted ? 'completed' : 'active',
           startTime: session.sessionStartTime, lastActivityTime: session.lastActivityTime,
+          ...(session.cwd ? { cwd: session.cwd } : {}),
         })
       }
       if (codexWatcher) sessionList.push(...codexWatcher.getActiveSessions())
