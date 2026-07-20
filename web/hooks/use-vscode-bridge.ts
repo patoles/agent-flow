@@ -33,6 +33,15 @@ interface BridgeHookResult {
   sessionsWithActivity: Set<string>
   /** Remove a session from the list */
   removeSession: (sessionId: string) => void
+  /** Open (or reuse) a per-session event feed, decoupled from `selectedSessionId`.
+   *  Returns a STABLE array seeded with the session's buffered backlog; live events
+   *  for that session are appended in place. Used by split-view panes, each of which
+   *  drives its own simulation. Consume with `consumeSessionFeed`, release on unmount. */
+  openSessionFeed: (sessionId: string) => SimulationEvent[]
+  /** Clear a session feed in place after its simulation has consumed it. */
+  consumeSessionFeed: (sessionId: string) => void
+  /** Release a session feed so events stop accumulating for an unmounted pane. */
+  closeSessionFeed: (sessionId: string) => void
 }
 
 /**
@@ -58,6 +67,9 @@ export function useVSCodeBridge(): BridgeHookResult {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const selectedSessionIdRef = useRef<string | null>(null)
   const sessionEventsRef = useRef<Map<string, SimulationEvent[]>>(new Map())
+  /** Active per-session feeds (split-view panes). Each value is a stable array
+   *  mutated in place — live events are pushed here in addition to the buffer. */
+  const sessionFeedsRef = useRef<Map<string, SimulationEvent[]>>(new Map())
   /** True while a session switch is pending (between auto-select and useLayoutEffect).
    *  Prevents the animation frame from processing events in the wrong simulation context. */
   const sessionSwitchPendingRef = useRef(false)
@@ -124,6 +136,10 @@ export function useVSCodeBridge(): BridgeHookResult {
         const buf = sessionEventsRef.current.get(event.sessionId) || []
         buf.push(simEvent)
         sessionEventsRef.current.set(event.sessionId, buf)
+
+        // Feed any open split-view pane for this session (independent of selection)
+        const feed = sessionFeedsRef.current.get(event.sessionId)
+        if (feed) feed.push(simEvent)
       }
 
       // Deliver to pending if session matches (ref is always current).
@@ -177,6 +193,9 @@ export function useVSCodeBridge(): BridgeHookResult {
         selectedSessionIdRef.current = null
         pendingEventsRef.current.length = 0
         sessionEventsRef.current.clear()
+        // Clear feed contents in place (keep the arrays so mounted panes keep
+        // their stable reference) — a reset means the panel was reopened.
+        for (const feed of sessionFeedsRef.current.values()) feed.length = 0
         setSessionsWithActivity(new Set())
         dismissedSessionsRef.current.clear()
         setEventVersion(v => v + 1)
@@ -295,6 +314,26 @@ export function useVSCodeBridge(): BridgeHookResult {
     })
   }, [])
 
+  /** Open (or reuse) a per-session feed seeded with the session's backlog.
+   *  The returned array is stable across renders and mutated in place as live
+   *  events arrive, so a pane's simulation can consume it without re-renders. */
+  const openSessionFeed = useCallback((sessionId: string): SimulationEvent[] => {
+    const existing = sessionFeedsRef.current.get(sessionId)
+    if (existing) return existing
+    const seed = (sessionEventsRef.current.get(sessionId) ?? []).slice()
+    sessionFeedsRef.current.set(sessionId, seed)
+    return seed
+  }, [])
+
+  const consumeSessionFeed = useCallback((sessionId: string) => {
+    const feed = sessionFeedsRef.current.get(sessionId)
+    if (feed) feed.length = 0
+  }, [])
+
+  const closeSessionFeed = useCallback((sessionId: string) => {
+    sessionFeedsRef.current.delete(sessionId)
+  }, [])
+
   const bridgeOpenFile = useCallback((filePath: string, line?: number) => {
     vscodeBridge?.openFile(filePath, line)
   }, [])
@@ -315,5 +354,8 @@ export function useVSCodeBridge(): BridgeHookResult {
     getSessionEventCount,
     sessionsWithActivity,
     removeSession,
+    openSessionFeed,
+    consumeSessionFeed,
+    closeSessionFeed,
   }
 }
