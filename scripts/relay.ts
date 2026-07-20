@@ -350,6 +350,34 @@ function removeDiscoveryFile() {
   }
 }
 
+/** Cross-platform liveness check. process.kill(pid, 0) works on Windows too:
+ *  ESRCH => gone, EPERM => exists but unsignalable (alive). */
+function isPidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** Remove discovery files left behind by dead instances. The hook forwarder
+ *  also self-cleans, but a hard kill / crash / terminal close skips the relay's
+ *  own dispose, so files pile up (especially on Windows, where the old hook
+ *  never GC'd them). Running this at every startup keeps the directory bounded
+ *  and stops the hook fanning out POSTs to dead ports. */
+function cleanupStaleDiscoveryFiles() {
+  let files: string[]
+  try { files = fs.readdirSync(DISCOVERY_DIR) } catch { return }
+  for (const file of files) {
+    if (!file.endsWith('.json') || file === 'workspaces.json') continue
+    const filePath = path.join(DISCOVERY_DIR, file)
+    let pid: unknown
+    try { pid = JSON.parse(fs.readFileSync(filePath, 'utf8')).pid } catch { continue }
+    if (typeof pid !== 'number' || pid === process.pid) continue
+    if (!isPidAlive(pid)) {
+      try { fs.unlinkSync(filePath); log(`[discovery] removed stale ${file} (pid ${pid})`) } catch {}
+    }
+  }
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export interface Relay {
@@ -408,6 +436,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       broadcast(JSON.stringify({ type: 'agent-event', event }))
     })
 
+    cleanupStaleDiscoveryFiles()
     writeDiscoveryFile(hookPort, workspace)
 
     scanForActiveSessions(workspace)

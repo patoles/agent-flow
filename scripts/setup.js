@@ -56,7 +56,6 @@ const os = require('os');
 setTimeout(() => process.exit(0), ${HOOK_TIMEOUT_S * 1000 - HOOK_SAFETY_MARGIN_MS});
 
 const DIR = path.join(os.homedir(), '.claude', 'agent-flow');
-const IS_WIN = process.platform === 'win32';
 
 function normPath(p) {
   let r = path.resolve(p);
@@ -64,9 +63,15 @@ function normPath(p) {
   return r;
 }
 
+// Cross-platform liveness check. process.kill(pid, 0) works on Windows too:
+// ESRCH => the process is gone, EPERM => it exists but we can't signal it (so
+// it IS alive). Treating EPERM as alive avoids ever deleting a live instance's
+// discovery file, while still letting dead ones be garbage-collected on Windows
+// (the old "return true on win32" left stale files forever for the CLI app,
+// which has no extension activation to clean them up).
 function isAlive(pid) {
-  if (IS_WIN) return true;
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return e.code === 'EPERM'; }
 }
 
 let input = '';

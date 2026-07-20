@@ -149,7 +149,8 @@ function getHookScriptContent(): string {
 // HTTP POST. Dead instances are cleaned up automatically.
 //
 // v3: containment-based workspace matching (supports subdirectory CWD),
-//     realpathSync normalization (handles symlinks), Windows-safe PID checks.
+//     realpathSync normalization (handles symlinks), cross-platform PID checks
+//     (dead discovery files are garbage-collected on Windows too).
 //
 // Discovery dir: ~/.claude/agent-flow/
 // Discovery file: {workspace-hash}-{pid}.json  →  { port, pid, workspace }
@@ -165,7 +166,6 @@ const os = require('os');
 setTimeout(() => process.exit(0), ${HOOK_TIMEOUT_S * 1000 - HOOK_SAFETY_MARGIN_MS});
 
 const DIR = path.join(os.homedir(), '.claude', 'agent-flow');
-const IS_WIN = process.platform === 'win32';
 
 /** Normalize a path: resolve and follow symlinks where possible */
 function normPath(p) {
@@ -174,12 +174,13 @@ function normPath(p) {
   return r;
 }
 
-/** Check if a process is alive. On Windows, process.kill(pid, 0) is unreliable
- *  (can throw even for live processes), so we skip the check and let stale
- *  discovery files be cleaned up by the extension on activation instead. */
+/** Check if a process is alive. process.kill(pid, 0) works cross-platform,
+ *  Windows included: ESRCH means the process is gone, EPERM means it exists
+ *  but can't be signalled (so it IS alive). Treating EPERM as alive never
+ *  deletes a live instance's file, while dead files still get cleaned up. */
 function isAlive(pid) {
-  if (IS_WIN) return true;
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return e.code === 'EPERM'; }
 }
 
 let input = '';
@@ -207,7 +208,7 @@ process.stdin.on('end', () => {
     try { d = JSON.parse(fs.readFileSync(path.join(DIR, file), 'utf8')); } catch { continue; }
     if (!d.workspace || !d.pid || !d.port) continue;
 
-    // Clean up dead instances (skip on Windows where PID check is unreliable)
+    // Clean up dead instances (cross-platform, Windows included)
     if (!isAlive(d.pid)) {
       try { fs.unlinkSync(path.join(DIR, file)); } catch {}
       continue;
