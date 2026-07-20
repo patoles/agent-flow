@@ -123,4 +123,23 @@ Gotchas rencontrés à la vérif :
   a qu'un projet.
 - Vérif : `node app/build.js` OK ; 40 tests OK ; `tsc --noEmit` OK (web + extension) ; smoke test
   sur `-p 4101` → dashboard servi + `cwd` présent dans le SSE (`…\worktrees\agent-flow\agent-flow-1`).
-- Non fait (Phase 2, stretch) : panneaux splittables redimensionnables (multi-canvas).
+
+## 7. Statut — Phase 2 livrée (MVP)
+
+Panneaux splittables N sessions côte à côte. Mode **OFF par défaut** : le mono-session reste le
+fallback intact.
+
+- **Bridge** : flux par session découplé de `selectedSessionId` (`openSessionFeed` / `consumeSessionFeed`
+  / `closeSessionFeed`) — chaque pane consomme le backlog + le live de SA session, tableau muté en place.
+- **`SessionPane`** (`session-pane.tsx`) : un `useAgentSimulation` + un `useSelectionState` + un
+  `<AgentCanvas/>` par `sessionId` fixe. Bandeau projet › worktree › label + nb agents. Carte détail
+  agent au clic (contenue dans le pane). Audio **uniquement sur le pane focalisé** (maps vides ailleurs).
+- **`SplitView`** (`split-view.tsx`) : grille 1×N / 2×2 avec poignées de redim (fractions
+  colonne/ligne draggables, **sans lib**). Plafond `MAX_PANES = 4` avec notice si dépassement.
+- **Toggle « Split »** dans le `TopBar` (visible seulement avec des sessions live) ; réutilise le
+  filtre projet/worktree de la Phase 1 pour choisir les sessions affichées.
+- **Hors périmètre MVP** (le mono-session les conserve) : timeline / seek / transcript par pane,
+  pop-ups outil & discovery en split, contrôle mute partagé (le pane focalisé respecte la préf. mute
+  persistée). `AgentCanvas` se dimensionne à son parent → aucune modif du canvas nécessaire.
+- **Vérif** : `node app/build.js` OK ; `tsc --noEmit` OK (web) ; 8 tests grouping OK ; smoke test
+  `-p 4137` → dashboard servi (200, `#root`).

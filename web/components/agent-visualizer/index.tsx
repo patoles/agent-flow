@@ -24,6 +24,8 @@ import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { TopBar } from "./top-bar"
 import type { SessionFilter } from "./session-nav"
+import { SplitView } from "./split-view"
+import { deriveProjectWorktree } from "@/lib/session-grouping"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -73,6 +75,9 @@ export function AgentVisualizer() {
   // Grouping filter — restricts which project/worktree tabs are shown.
   // null = show all sessions (fallback = current behaviour).
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>(null)
+  // Split view — render one pane per session (grouped/filtered) side by side.
+  // Off by default: single-session mode stays the fallback.
+  const [splitView, setSplitView] = useState(false)
 
   // Mutually exclusive panel toggling — opening one closes the others
   const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost') => {
@@ -260,9 +265,30 @@ export function AgentVisualizer() {
 
   const isEmpty = agents.size === 0 && !bridge.useMockData
 
+  // Sessions shown as panes in split view — the current project/worktree filter
+  // decides which ones (null filter = all live sessions).
+  const paneSessions = useMemo(() => {
+    if (!sessionFilter) return bridge.sessions
+    return bridge.sessions.filter(s => {
+      const { project, worktree } = deriveProjectWorktree(s.cwd)
+      if (project !== sessionFilter.project) return false
+      return sessionFilter.worktree === null || worktree === sessionFilter.worktree
+    })
+  }, [bridge.sessions, sessionFilter])
+
+  // Split view only applies with live sessions — never in mock/demo mode.
+  const canSplit = !bridge.useMockData && bridge.sessions.length > 0
+  const showSplit = splitView && canSplit && paneSessions.length > 0
+
   return (
     <OpenFileProvider value={bridge.isVSCode ? openFile : null}>
     <div className="h-screen w-screen relative overflow-hidden" style={{ background: COLORS.void }}>
+      {/* Split view: one isolated pane per session, grouped/filtered side by side */}
+      {showSplit && <SplitView sessions={paneSessions} bridge={bridge} />}
+
+      {/* Single-session mode (default / fallback) */}
+      {!showSplit && (
+      <>
       {/* Empty state when no demo and no live data */}
       {isEmpty && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
@@ -402,8 +428,10 @@ export function AgentVisualizer() {
         currentTime={currentTime}
         onClose={() => setShowTimeline(false)}
       />
+      </>
+      )}
 
-      {/* Top bar: session tabs + info/controls */}
+      {/* Top bar: session tabs + info/controls (always shown) */}
       <TopBar
         sessions={bridge.sessions}
         selectedSessionId={bridge.selectedSessionId}
@@ -424,6 +452,9 @@ export function AgentVisualizer() {
         onTogglePanel={toggleExclusivePanel}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}
         onToggleMute={handleToggleMute}
+        canSplit={canSplit}
+        splitView={splitView}
+        onToggleSplit={() => setSplitView(v => !v)}
       />
     </div>
     </OpenFileProvider>

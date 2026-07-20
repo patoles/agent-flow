@@ -101,6 +101,10 @@ export interface TopBarProps {
   onTogglePanel: (panel: 'files' | 'transcript' | 'cost') => void
   onToggleTimeline: () => void
   onToggleMute: () => void
+  // Split view
+  canSplit: boolean
+  splitView: boolean
+  onToggleSplit: () => void
 }
 
 export const TopBar = memo(function TopBar({
@@ -111,6 +115,7 @@ export const TopBar = memo(function TopBar({
   agentCount, totalTokens,
   showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
   onTogglePanel, onToggleTimeline, onToggleMute,
+  canSplit, splitView, onToggleSplit,
 }: TopBarProps) {
   return (
     <div className="absolute top-3 left-3 right-3 flex items-center gap-4 font-mono text-[10px]" style={{ zIndex: Z.info }}>
@@ -161,6 +166,9 @@ export const TopBar = memo(function TopBar({
         </div>
 
         {/* Independent toggles */}
+        {canSplit && (
+          <ToggleButton active={splitView} onClick={onToggleSplit}>Split</ToggleButton>
+        )}
         <ToggleButton active={showTimeline} onClick={onToggleTimeline}>Timeline</ToggleButton>
         <ToggleButton active={!isMuted} onClick={onToggleMute} style={{ border: `1px solid ${COLORS.toggleBorder}` }}>
           {isMuted ? <MutedIcon /> : <UnmutedIcon />}
