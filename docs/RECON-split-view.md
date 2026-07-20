@@ -100,8 +100,27 @@ Contrainte structurelle : `useAgentSimulation` est **mono-instance** liée à `s
 ## 5. Commande de lancement du fork
 
 ```bash
-pnpm install
-pnpm run build:app          # build web (Vite) + bundle app (esbuild) → app/dist/
+corepack pnpm install       # pnpm absent du PATH → passer par corepack
+node app/build.js           # build web (Vite) + bundle app (esbuild) → app/dist/
 node app/dist/app.js -p 4100   # OBLIGATOIRE : -p 4100 (3001 = daemon AO)
 # dashboard : http://127.0.0.1:4100
 ```
+
+Gotchas rencontrés à la vérif :
+- **Ne pas passer par `pnpm run build:app`** : le wrapper `pnpm run` relance un check de
+  dépendances qui échoue (`ERR_PNPM_IGNORED_BUILDS` sur esbuild/sharp) et interrompt le build.
+  Lancer directement `node app/build.js` (esbuild fonctionne, le postinstall ignoré est sans effet ici).
+- **Port 4100 déjà occupé** par une instance `npx agent-flow-app` publiée peut donner un
+  `EADDRINUSE` : vérifier avec `netstat -ano | grep :4100`. Pour un test isolé de ce fork sans
+  toucher à l'instance en cours, lancer sur un autre port libre (ex. `-p 4101`).
+
+## 6. Statut — Phase 1 livrée
+
+- Plomberie `cwd` : `WatchedSession.cwd`, capté par `TranscriptParser` (Claude) et
+  `CodexSessionWatcher` (via `session_meta`), remonté dans `SessionInfo` (SSE + webview).
+- Client : `deriveProjectWorktree` / `groupSessions` (8 tests unitaires) + composant `SessionNav`
+  (dropdown de filtre projet/worktree + groupes repliables) ; fallback plat conservé quand il n'y
+  a qu'un projet.
+- Vérif : `node app/build.js` OK ; 40 tests OK ; `tsc --noEmit` OK (web + extension) ; smoke test
+  sur `-p 4101` → dashboard servi + `cwd` présent dans le SSE (`…\worktrees\agent-flow\agent-flow-1`).
+- Non fait (Phase 2, stretch) : panneaux splittables redimensionnables (multi-canvas).
