@@ -1,31 +1,60 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { COLORS } from '@/lib/colors'
 import { SessionPane, type PaneBridge } from './session-pane'
 import type { SessionInfo } from '@/lib/bridge-types'
 
-/** Hard cap on simultaneous panes — each runs its own simulation + canvas rAF
- *  loop, so more than this starves the frame budget. Extra sessions are dropped
- *  (with a visible notice) rather than silently animating off-screen. */
+/** Hard cap on simultaneous panes — each hosted pane typically runs its own
+ *  simulation + canvas rAF loop, so more than this starves the frame budget.
+ *  Extra items are dropped (with a visible notice) rather than silently
+ *  animating off-screen. */
 export const MAX_PANES = 4
-
-interface SplitViewProps {
-  /** Sessions to show as panes (already filtered by project/worktree upstream). */
-  sessions: SessionInfo[]
-  bridge: PaneBridge
-}
 
 const clampFraction = (f: number) => Math.min(0.85, Math.max(0.15, f))
 
+/** Anything the shell can lay out only needs a stable id (for React keys and
+ *  focus tracking). The pane content itself is supplied by the caller. */
+interface PaneItem {
+  id: string
+}
+
+/** Per-pane context handed to `renderPane` so the caller can style/behave
+ *  according to focus and request focus on interaction. */
+export interface PaneRenderContext {
+  /** True for the single currently-focused pane (e.g. the only one emitting audio). */
+  focused: boolean
+  /** Ask the shell to move focus to this pane's id. */
+  onFocus: (id: string) => void
+}
+
+interface SplitLayoutProps<T extends PaneItem> {
+  /** Items to lay out as panes (already filtered upstream). */
+  items: T[]
+  /** Fills one pane cell for `item`; the shell owns the grid, this owns content. */
+  renderPane: (item: T, ctx: PaneRenderContext) => ReactNode
+  /** Cap on simultaneous panes; defaults to {@link MAX_PANES}. */
+  maxPanes?: number
+  /** Optional inner content for the "N hidden" notice when items exceed the cap. */
+  renderDropped?: (dropped: number, max: number) => ReactNode
+}
+
 /**
- * Resizable grid of {@link SessionPane}s — the split view. Lays panes out in a
- * 1×N / 2×2 grid (capped at {@link MAX_PANES}) with draggable dividers, no
- * external layout library. One pane is "focused" at a time so only it emits audio.
+ * Reusable split layout shell — a resizable 1×N / 2×2 grid (capped at
+ * {@link MAX_PANES}) with draggable dividers and single-focus tracking, no
+ * external layout library. The grid, handles, cap and focus logic are fully
+ * decoupled from pane *content*: callers pass `renderPane` to fill each cell
+ * (today a {@link SessionPane}; tomorrow an orchestrator pane), so new pane
+ * types can be hosted without touching the layout.
  */
-export function SplitView({ sessions, bridge }: SplitViewProps) {
-  const panes = sessions.slice(0, MAX_PANES)
-  const dropped = sessions.length - panes.length
+export function SplitLayout<T extends PaneItem>({
+  items,
+  renderPane,
+  maxPanes = MAX_PANES,
+  renderDropped,
+}: SplitLayoutProps<T>) {
+  const panes = items.slice(0, maxPanes)
+  const dropped = items.length - panes.length
 
   const cols = panes.length <= 1 ? 1 : 2
   const rows = panes.length <= 2 ? 1 : 2
@@ -69,29 +98,23 @@ export function SplitView({ sessions, bridge }: SplitViewProps) {
     document.body.style.userSelect = 'none'
   }, [])
 
-  const rowOf = useCallback((paneList: SessionInfo[]) => (
+  const rowOf = useCallback((paneList: T[]) => (
     <div className="flex flex-row min-h-0 h-full w-full">
-      {paneList.map((session, i) => (
+      {paneList.map((item, i) => (
         <ColCell
-          key={session.id}
+          key={item.id}
           grow={cols === 2 ? (i === 0 ? colFraction : 1 - colFraction) : 1}
           showDivider={cols === 2 && i === 0}
           onDividerDown={startDrag('col')}
         >
-          <SessionPane
-            sessionId={session.id}
-            session={session}
-            bridge={bridge}
-            focused={session.id === focusedId}
-            onFocus={setFocusedId}
-          />
+          {renderPane(item, { focused: item.id === focusedId, onFocus: setFocusedId })}
         </ColCell>
       ))}
     </div>
-  ), [bridge, colFraction, cols, focusedId, startDrag])
+  ), [renderPane, colFraction, cols, focusedId, startDrag])
 
   const [topRow, bottomRow] = useMemo(() => {
-    if (rows === 1) return [panes, [] as SessionInfo[]]
+    if (rows === 1) return [panes, [] as T[]]
     return [panes.slice(0, 2), panes.slice(2)]
   }, [panes, rows])
 
@@ -116,12 +139,12 @@ export function SplitView({ sessions, bridge }: SplitViewProps) {
         </div>
       )}
 
-      {dropped > 0 && (
+      {dropped > 0 && renderDropped && (
         <div
           className="absolute bottom-2 left-1/2 -translate-x-1/2 font-mono text-[10px] px-2 py-1 rounded pointer-events-none"
           style={{ background: COLORS.holoBg03, border: `1px solid ${COLORS.holoBorder06}`, color: COLORS.textMuted }}
         >
-          +{dropped} session{dropped > 1 ? 's' : ''} hidden — narrow the project/worktree filter (max {MAX_PANES} panes)
+          {renderDropped(dropped, maxPanes)}
         </div>
       )}
     </div>
@@ -149,5 +172,37 @@ function ColCell({ grow, showDivider, onDividerDown, children }: {
         />
       )}
     </>
+  )
+}
+
+interface SplitViewProps {
+  /** Sessions to show as panes (already filtered by project/worktree upstream). */
+  sessions: SessionInfo[]
+  bridge: PaneBridge
+}
+
+/**
+ * Session split view — the concrete, session-flavoured use of {@link SplitLayout}.
+ * A thin adapter that maps each {@link SessionInfo} to a {@link SessionPane}; all
+ * grid / resize / focus / cap behaviour lives in the shell, so this stays purely
+ * about "what a session pane is".
+ */
+export function SplitView({ sessions, bridge }: SplitViewProps) {
+  return (
+    <SplitLayout
+      items={sessions}
+      renderPane={(session, { focused, onFocus }) => (
+        <SessionPane
+          sessionId={session.id}
+          session={session}
+          bridge={bridge}
+          focused={focused}
+          onFocus={onFocus}
+        />
+      )}
+      renderDropped={(dropped, max) => (
+        <>+{dropped} session{dropped > 1 ? 's' : ''} hidden — narrow the project/worktree filter (max {max} panes)</>
+      )}
+    />
   )
 }
