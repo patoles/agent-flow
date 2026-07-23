@@ -6,6 +6,7 @@ import { useSelectionState } from '@/hooks/use-selection-state'
 import { useAudioEffects } from '@/hooks/use-audio-effects'
 import { AgentCanvas } from './canvas'
 import { AgentDetailCard } from './agent-detail-card'
+import { AgentChatPanel } from './chat-panel'
 import { stopPropagationHandlers } from './shared-ui'
 import { COLORS } from '@/lib/colors'
 import { TIMING } from '@/lib/agent-types'
@@ -51,7 +52,7 @@ export function SessionPane({ sessionId, session, bridge, focused, onFocus }: Se
   useEffect(() => () => bridge.closeSessionFeed(sessionId), [sessionId, bridge])
 
   const {
-    frameRef, agents, toolCalls, discoveries,
+    frameRef, agents, toolCalls, discoveries, conversations,
     play, updateAgentPosition,
   } = useAgentSimulation({
     useMockData: false,
@@ -80,6 +81,7 @@ export function SessionPane({ sessionId, session, bridge, focused, onFocus }: Se
   )
   const label = session?.label || sessionId.slice(0, 8)
   const selectedAgent = selection.selectedAgentId ? agents.get(selection.selectedAgentId) : null
+  const selectedConversation = selection.selectedAgentId ? (conversations.get(selection.selectedAgentId) ?? []) : []
 
   return (
     <div
@@ -127,6 +129,17 @@ export function SessionPane({ sessionId, session, bridge, focused, onFocus }: Se
           <AgentDetailCard agent={selectedAgent} onClose={selection.clearAgent} />
         </div>
       )}
+
+      {/* Chat panel — one per pane, absolute so it anchors to THIS pane (never
+          the viewport), preventing overlap between panes in the split view. */}
+      <AgentChatPanel
+        visible={!!selectedAgent}
+        agentName={selectedAgent?.name ?? ''}
+        agentState={selectedAgent?.state ?? 'idle'}
+        conversation={selectedConversation}
+        runtime={selectedAgent?.runtime ?? 'claude'}
+        onClose={selection.clearAgent}
+      />
     </div>
   )
 }
