@@ -134,7 +134,7 @@ Other scripts:
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=patoles/agent-flow&type=date&legend=bottom-right)](https://www.star-history.com/?repos=patoles%2Fagent-flow&type=date&legend=bottom-right)
+[![Star History Chart](https://star-history.dera.page/svg?repos=patoles/agent-flow&type=date&legend=bottom-right)](https://star-history.dera.page/#patoles/agent-flow&type=date&legend=bottom-right)
 
 
 ## Author
