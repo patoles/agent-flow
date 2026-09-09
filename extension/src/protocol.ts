@@ -188,6 +188,14 @@ export interface WatchedSession {
   subagentsDir: string | null
   label: string
   labelSet: boolean
+  /** While replaying history: wall-clock ms of the entry being processed, so elapsed() reflects real timing */
+  replayNow?: number | null
+  /** Total idle time removed from the timeline by gap compression (ms) */
+  compressedMs?: number
+  /** Wall-clock ms of the last processed transcript entry, for gap compression */
+  lastEventWall?: number
+  /** Last value returned by elapsed(); events are never stamped earlier than this */
+  lastElapsed?: number
   model: string | null
   /** Maps agent names to their last emitted model ID — re-emits on model change */
   modelDetectedAgents: Map<string, string>
