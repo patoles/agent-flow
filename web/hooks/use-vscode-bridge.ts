@@ -220,9 +220,9 @@ export function useVSCodeBridge(): BridgeHookResult {
         selectedSessionIdRef.current = session.id
         setSelectedSessionId(session.id)
       } else if (type === 'updated') {
-        const { sessionId, label } = data as { sessionId: string; label: string }
+        const { sessionId, label, cwd } = data as { sessionId: string; label: string; cwd?: string }
         setSessions(prev => prev.map(s =>
-          s.id === sessionId ? { ...s, label } : s
+          s.id === sessionId ? { ...s, label, cwd: cwd ?? s.cwd } : s
         ))
       } else if (type === 'ended') {
         const sessionId = data as string

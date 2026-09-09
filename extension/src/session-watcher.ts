@@ -94,6 +94,7 @@ export class SessionWatcher implements AgentSessionWatcher {
     return Array.from(this.sessions.values()).map(s => ({
       id: s.sessionId,
       label: s.label,
+      cwd: s.cwd,
       status: s.sessionCompleted ? 'completed' : 'active',
       startTime: s.sessionStartTime,
       lastActivityTime: s.lastActivityTime,
@@ -428,7 +429,7 @@ export class SessionWatcher implements AgentSessionWatcher {
 
     // Emit session start
     this._onSessionDetected.fire(sessionId)
-    this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+    this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label, cwd: session.cwd })
 
     this.emit({
       time: 0,
@@ -520,7 +521,7 @@ export class SessionWatcher implements AgentSessionWatcher {
           ...(session.model ? { model: session.model } : {}),
         },
       }, sessionId)
-      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label, cwd: session.cwd })
     }
 
     if (session.inactivityTimer) {
