@@ -3,8 +3,8 @@ import { COLORS, getStateColor, contextSegments } from '@/lib/colors'
 import {
   AGENT_DRAW, CONTEXT_BAR, CONTEXT_RING, STATS_OVERLAY,
 } from '@/lib/canvas-constants'
-import { alphaHex, formatTokens } from '@/lib/utils'
-import { truncateText, drawHexagon, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
+import { alphaHex, formatTokens, getModelColor } from '@/lib/utils'
+import { truncateText, drawHexagon, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX, drawPolygon, agentSides } from './draw-misc'
 import { getAgentGlowSprite } from './render-cache'
 
 let _claudeSparkPath: Path2D | null = null
@@ -179,7 +179,7 @@ function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number)
   ctx.shadowBlur = AGENT_DRAW.shadowBlur
   ctx.shadowOffsetX = AGENT_DRAW.shadowOffsetX
   ctx.shadowOffsetY = AGENT_DRAW.shadowOffsetY
-  drawHexagon(ctx, agent.x, agent.y, r * 0.9)
+  drawPolygon(ctx, agent.x, agent.y, r * 0.9, agentSides(agent))
   ctx.fillStyle = COLORS.cardBgFaintOverlay
   ctx.fill()
   ctx.restore()
@@ -193,13 +193,13 @@ function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, c
   ctx.drawImage(sprite, agent.x - Math.ceil(glowR), agent.y - Math.ceil(glowR))
 
   // Ambient outer hex ring
-  drawHexagon(ctx, agent.x, agent.y, r + AGENT_DRAW.outerRingOffset)
+  drawPolygon(ctx, agent.x, agent.y, r + AGENT_DRAW.outerRingOffset, agentSides(agent))
   ctx.strokeStyle = color + '25'
   ctx.lineWidth = 1
   ctx.stroke()
 
   // Inner hex fill
-  drawHexagon(ctx, agent.x, agent.y, r)
+  drawPolygon(ctx, agent.x, agent.y, r, agentSides(agent))
   ctx.fillStyle = COLORS.nodeInterior
   ctx.fill()
 }
@@ -208,7 +208,7 @@ function drawScanline(ctx: CanvasRenderingContext2D, agent: Agent, r: number, co
   const scanSpeed = agent.state === 'thinking' || isHovered || isWaiting ? ANIM.scanline.thinking : ANIM.scanline.normal
   const scanY = agent.y - r + ((time * scanSpeed) % (r * 2))
   ctx.save()
-  drawHexagon(ctx, agent.x, agent.y, r)
+  drawPolygon(ctx, agent.x, agent.y, r, agentSides(agent))
   ctx.clip()
   const scanGrad = ctx.createLinearGradient(agent.x, scanY - AGENT_DRAW.scanlineHalfH, agent.x, scanY + AGENT_DRAW.scanlineHalfH)
   const scanAlpha = isHovered ? '35' : '20'
@@ -221,7 +221,7 @@ function drawScanline(ctx: CanvasRenderingContext2D, agent: Agent, r: number, co
 }
 
 function drawStateRing(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isHovered: boolean, isSelected: boolean, isWaiting: boolean, time: number) {
-  drawHexagon(ctx, agent.x, agent.y, r)
+  drawPolygon(ctx, agent.x, agent.y, r, agentSides(agent))
   ctx.strokeStyle = color
   ctx.lineWidth = (isSelected || isHovered) ? 2.5 : 2
   if (agent.state === 'complete') {
@@ -342,7 +342,10 @@ export function drawAgents(
 ) {
   for (const [id, agent] of agents) {
     const radius = agent.isMain ? NODE.radiusMain : NODE.radiusSub
-    const color = getStateColor(agent.state)
+    // Model family colors the node; alert states (error, paused, waiting) keep their state color
+    const modelColor = getModelColor(agent.model)
+    const alert = agent.state === 'error' || agent.state === 'paused' || agent.state === 'waiting_permission'
+    const color = modelColor && !alert ? modelColor : getStateColor(agent.state)
     const isHovered = id === hoveredAgentId
     const isSelected = id === selectedAgentId
 

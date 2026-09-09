@@ -98,6 +98,8 @@ export interface TopBarProps {
   onTogglePanel: (panel: 'files' | 'transcript' | 'cost') => void
   onToggleTimeline: () => void
   onToggleMute: () => void
+  autoFit: boolean
+  onToggleAutoFit: () => void
 }
 
 export const TopBar = memo(function TopBar({
@@ -107,6 +109,7 @@ export const TopBar = memo(function TopBar({
   agentCount, totalTokens,
   showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
   onTogglePanel, onToggleTimeline, onToggleMute,
+  autoFit, onToggleAutoFit,
 }: TopBarProps) {
   return (
     <div className="absolute top-3 left-3 right-3 flex items-center gap-4 font-mono text-[10px]" style={{ zIndex: Z.info }}>
@@ -156,6 +159,7 @@ export const TopBar = memo(function TopBar({
 
         {/* Independent toggles */}
         <ToggleButton active={showTimeline} onClick={onToggleTimeline}>Timeline</ToggleButton>
+        <ToggleButton active={autoFit} onClick={onToggleAutoFit} style={{ border: `1px solid ${COLORS.toggleBorder}` }}>Auto-fit</ToggleButton>
         <ToggleButton active={!isMuted} onClick={onToggleMute} style={{ border: `1px solid ${COLORS.toggleBorder}` }}>
           {isMuted ? <MutedIcon /> : <UnmutedIcon />}
         </ToggleButton>

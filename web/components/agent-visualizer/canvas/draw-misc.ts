@@ -53,9 +53,18 @@ export function drawTetherLine(ctx: CanvasRenderingContext2D, agent: Agent, tran
 
 /** Draw a regular hexagon centered at (x, y) */
 export function drawHexagon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
+  drawPolygon(ctx, x, y, radius, 6)
+}
+
+/** Flatland rule: the orchestrator is a hexagon, each nesting level loses one side, down to a triangle. */
+export function agentSides(agent: { depth?: number }): number {
+  return Math.max(3, 6 - (agent.depth ?? 0))
+}
+
+export function drawPolygon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, sides: number) {
   ctx.beginPath()
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i - Math.PI / 2
+  for (let i = 0; i < sides; i++) {
+    const angle = (2 * Math.PI / sides) * i - Math.PI / 2
     const px = x + radius * Math.cos(angle)
     const py = y + radius * Math.sin(angle)
     if (i === 0) ctx.moveTo(px, py)

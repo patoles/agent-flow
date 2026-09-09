@@ -23,6 +23,7 @@ import { COLORS } from "@/lib/colors"
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { TopBar } from "./top-bar"
+import { AUTOFIT_PREF_KEY } from "@/lib/canvas-constants"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -77,6 +78,16 @@ export function AgentVisualizer() {
     setShowCostOverlay(prev => panel === 'cost' ? !prev : false)
   }, [])
   const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0)
+  // Off by default: with many agents a camera that keeps re-fitting fights the user.
+  const [autoFit, setAutoFit] = useState(() => {
+    try { return localStorage.getItem(AUTOFIT_PREF_KEY) === 'on' } catch { return false }
+  })
+  const toggleAutoFit = useCallback(() => {
+    setAutoFit(prev => {
+      try { localStorage.setItem(AUTOFIT_PREF_KEY, prev ? 'off' : 'on') } catch { /* ignore */ }
+      return !prev
+    })
+  }, [])
 
   const [isReviewing, setIsReviewing] = useState(false)
   const { isMuted, seekingRef, handleToggleMute } = useAudioEffects(agents, toolCalls, isReviewing)
@@ -232,6 +243,7 @@ export function AgentVisualizer() {
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
     ] : [
       { label: '🔍  Zoom to Fit', onClick: () => setZoomToFitTrigger(n => n + 1) },
+      { label: `${autoFit ? '☑' : '☐'}  Auto-fit`, onClick: toggleAutoFit },
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
       { label: '⬡  Toggle Grid', onClick: () => setShowHexGrid(prev => !prev) },
       { label: '', onClick: () => {}, separator: true },
@@ -278,6 +290,7 @@ export function AgentVisualizer() {
         showHexGrid={showHexGrid}
         zoomToFitTrigger={zoomToFitTrigger}
         pauseAutoFit={selection.contextMenu !== null}
+        autoFit={autoFit}
         onAgentClick={selection.handleAgentClick}
         onAgentHover={selection.setHoveredAgentId}
         onAgentDrag={updateAgentPosition}
@@ -417,6 +430,8 @@ export function AgentVisualizer() {
         isMuted={isMuted}
         onTogglePanel={toggleExclusivePanel}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}
+        autoFit={autoFit}
+        onToggleAutoFit={toggleAutoFit}
         onToggleMute={handleToggleMute}
       />
     </div>
