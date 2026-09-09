@@ -98,6 +98,10 @@ export interface TopBarProps {
   onTogglePanel: (panel: 'files' | 'transcript' | 'cost') => void
   onToggleTimeline: () => void
   onToggleMute: () => void
+  isExporting: boolean
+  exportProgress: number
+  exportResult: string | null
+  onToggleExport: () => void
 }
 
 export const TopBar = memo(function TopBar({
@@ -107,6 +111,7 @@ export const TopBar = memo(function TopBar({
   agentCount, totalTokens,
   showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
   onTogglePanel, onToggleTimeline, onToggleMute,
+  isExporting, exportProgress, exportResult, onToggleExport,
 }: TopBarProps) {
   return (
     <div className="absolute top-3 left-3 right-3 flex items-center gap-4 font-mono text-[10px]" style={{ zIndex: Z.info }}>
@@ -156,6 +161,15 @@ export const TopBar = memo(function TopBar({
 
         {/* Independent toggles */}
         <ToggleButton active={showTimeline} onClick={onToggleTimeline}>Timeline</ToggleButton>
+        <ToggleButton
+          active={isExporting}
+          onClick={onToggleExport}
+          activeColor={{ bg: COLORS.costActiveBg, text: COLORS.error }}
+          style={{ border: `1px solid ${COLORS.toggleBorder}` }}
+        >
+          {isExporting ? `● REC ${Math.round(exportProgress * 100)}%` : 'Export'}
+        </ToggleButton>
+        {exportResult && <span style={{ color: COLORS.complete }}>{exportResult}</span>}
         <ToggleButton active={!isMuted} onClick={onToggleMute} style={{ border: `1px solid ${COLORS.toggleBorder}` }}>
           {isMuted ? <MutedIcon /> : <UnmutedIcon />}
         </ToggleButton>

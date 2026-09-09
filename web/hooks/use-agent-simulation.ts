@@ -305,6 +305,12 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     commitState(next)
   }, [commitState])
 
+  /** Move the clock forward without replaying — only safe across a stretch with no events (used by the export to skip idle gaps) */
+  const skipTo = useCallback((t: number) => {
+    const prev = frameRef.current
+    commitState({ ...prev, currentTime: t, maxTimeReached: Math.max(prev.maxTimeReached, t) })
+  }, [commitState])
+
   const setSpeed = useCallback((speed: number) => {
     frameRef.current = { ...frameRef.current, speed }
     setState(prev => ({ ...prev, speed }))
@@ -420,7 +426,7 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     currentTime: state.currentTime, isPlaying: state.isPlaying, speed: state.speed,
     maxTimeReached: state.maxTimeReached,
     conversations: state.conversations,
-    play, pause, restart, setSpeed, seekToTime,
+    play, pause, restart, setSpeed, seekToTime, skipTo,
     updateAgentPosition,
     saveSnapshot, restoreSnapshot,
   }
