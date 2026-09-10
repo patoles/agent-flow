@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { vscodeBridge, type ConnectionStatus, type AgentEvent, type SessionInfo } from '@/lib/vscode-bridge'
+import type { FileCollision } from '@/lib/bridge-types'
 import { SimulationEvent } from '@/lib/agent-types'
 
 interface BridgeHookResult {
@@ -33,6 +34,8 @@ interface BridgeHookResult {
   sessionsWithActivity: Set<string>
   /** Remove a session from the list */
   removeSession: (sessionId: string) => void
+  /** Live same-file collisions keyed by file path */
+  collisions: Map<string, FileCollision>
 }
 
 /**
@@ -43,6 +46,8 @@ interface BridgeHookResult {
  * Supports multi-session: events are buffered per-session so switching
  * sessions replays the correct event history.
  */
+const COLLISION_TTL_MS = 90 * 1000
+
 export function useVSCodeBridge(): BridgeHookResult {
   const [isVSCode, setIsVSCode] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
@@ -62,6 +67,20 @@ export function useVSCodeBridge(): BridgeHookResult {
    *  Prevents the animation frame from processing events in the wrong simulation context. */
   const sessionSwitchPendingRef = useRef(false)
   const [sessionsWithActivity, setSessionsWithActivity] = useState<Set<string>>(new Set())
+  /** Live same-file collisions across all sessions, keyed by file; expire after COLLISION_TTL_MS */
+  const [collisions, setCollisions] = useState<Map<string, FileCollision>>(new Map())
+  useEffect(() => {
+    const t = setInterval(() => {
+      setCollisions(prev => {
+        const now = Date.now()
+        let changed = false
+        const next = new Map(prev)
+        for (const [k, c] of prev) if (now - c.seenAt > COLLISION_TTL_MS) { next.delete(k); changed = true }
+        return changed ? next : prev
+      })
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
 
   // Connect to standalone dev relay server via SSE when not in VS Code
   useEffect(() => {
@@ -112,6 +131,16 @@ export function useVSCodeBridge(): BridgeHookResult {
     // selectedSessionIdRef is updated synchronously (not via React state) so it's
     // always current even before React re-renders.
     const unsubEvent = bridge.onEvent((event: AgentEvent) => {
+      if (event.type === 'file_collision') {
+        // Global, not per-session: the same collision arrives once per involved session
+        const p = event.payload as { file: string; parties: FileCollision['parties']; sessions: string[] }
+        setCollisions(prev => {
+          const next = new Map(prev)
+          next.set(p.file, { file: p.file, parties: p.parties, sessions: p.sessions, seenAt: Date.now() })
+          return next
+        })
+        return
+      }
       const simEvent: SimulationEvent = {
         time: event.time,
         type: event.type as SimulationEvent['type'],
@@ -315,5 +344,6 @@ export function useVSCodeBridge(): BridgeHookResult {
     getSessionEventCount,
     sessionsWithActivity,
     removeSession,
+    collisions,
   }
 }

@@ -4,6 +4,9 @@ import { AudioEngine } from '@/lib/audio-engine'
 import type { Agent, ToolCallNode } from '@/lib/agent-types'
 import { detectStateChanges } from '@/components/agent-visualizer/canvas/detect-state-changes'
 
+/** More simultaneous transitions than this means history replay, not live activity */
+const REPLAY_BURST_THRESHOLD = 3
+
 export function useAudioEffects(
   agents: Map<string, Agent>,
   toolCalls: Map<string, ToolCallNode>,
@@ -40,6 +43,9 @@ export function useAudioEffects(
     )
     prevAgentStatesRef.current = newAgentStates
     prevToolStatesRef.current = newToolStates
+
+    // A burst of transitions means history is being replayed, not live activity — stay quiet
+    if (transitions.length > REPLAY_BURST_THRESHOLD) return
 
     for (const t of transitions) {
       switch (t.kind) {

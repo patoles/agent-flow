@@ -61,15 +61,24 @@ function log(...args: unknown[]) {
 
 const sseClients = new Set<http.ServerResponse>()
 
-function sendSSE(res: http.ServerResponse, data: unknown) {
-  try { res.write(`data: ${JSON.stringify(data)}\n\n`) } catch {
+// SSE ids let a reconnecting EventSource resume from where it left off
+// (Last-Event-ID) instead of receiving every session's history again.
+// BOOT_ID changes on every relay start so a stale id triggers a full reset.
+const BOOT_ID = Math.random().toString(36).slice(2, 10)
+let seq = 0
+
+function sendSSE(res: http.ServerResponse, data: unknown, id?: number) {
+  try {
+    res.write(`${id !== undefined ? `id: ${BOOT_ID}:${id}\n` : ''}data: ${JSON.stringify(data)}\n\n`)
+  } catch {
     sseClients.delete(res)
   }
 }
 
-function broadcast(data: string) {
+function broadcast(data: string, id?: number) {
+  const frame = `${id !== undefined ? `id: ${BOOT_ID}:${id}\n` : ''}data: ${data}\n\n`
   for (const res of sseClients) {
-    try { res.write(`data: ${data}\n\n`) } catch {
+    try { res.write(frame) } catch {
       sseClients.delete(res)
     }
   }
@@ -77,7 +86,14 @@ function broadcast(data: string) {
 
 // ─── Event buffering ────────────────────────────────────────────────────────
 
-const eventBuffer = new Map<string, AgentEvent[]>()
+interface BufferedEvent { seq: number; event: AgentEvent }
+const eventBuffer = new Map<string, BufferedEvent[]>()
+
+/** Events a late client cannot do without: everything else references these agents */
+const STRUCTURAL_EVENTS = new Set<string>(['agent_spawn', 'subagent_dispatch', 'model_detected'])
+
+/** While non-null, broadcastEvent() collects instead of sending — used to ship a replay as ONE batch frame */
+let replayBatch: AgentEvent[] | null = null
 
 function broadcastEvent(event: AgentEvent) {
   sessionEventCount++
@@ -88,16 +104,21 @@ function broadcastEvent(event: AgentEvent) {
   const sid = event.sessionId?.slice(0, SESSION_ID_DISPLAY) || '?'
   log(`[event] ${event.type} (session ${sid})`)
 
+  const id = ++seq
   if (event.sessionId) {
     let buf = eventBuffer.get(event.sessionId) || []
-    buf.push(event)
+    buf.push({ seq: id, event })
     if (buf.length > MAX_EVENT_BUFFER) {
-      buf = buf.slice(buf.length - MAX_EVENT_BUFFER)
+      // Trim the oldest events but keep structural ones (spawns, models):
+      // without them a late client gets a batch that references unknown agents
+      const dropped = buf.slice(0, buf.length - MAX_EVENT_BUFFER).filter(b => STRUCTURAL_EVENTS.has(b.event.type))
+      buf = dropped.concat(buf.slice(buf.length - MAX_EVENT_BUFFER))
     }
     eventBuffer.set(event.sessionId, buf)
   }
 
-  broadcast(JSON.stringify({ type: 'agent-event', event }))
+  if (replayBatch) { replayBatch.push(event); return }
+  broadcast(JSON.stringify({ type: 'agent-event', event }), id)
 }
 
 function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessionId: string, label: string) {
@@ -120,12 +141,19 @@ const sessions = new Map<string, WatchedSession>()
 function elapsed(sessionId?: string): number {
   if (sessionId) {
     const session = sessions.get(sessionId)
-    if (session) return (Date.now() - session.sessionStartTime) / 1000
+    if (session) {
+      const raw = ((session.replayNow ?? Date.now()) - session.sessionStartTime - (session.compressedMs ?? 0)) / 1000
+      // Timer- and subagent-driven emitters read the clock between advanceClock() calls;
+      // clamp so no event is ever stamped earlier than the previous one
+      session.lastElapsed = Math.max(raw, session.lastElapsed ?? 0)
+      return session.lastElapsed
+    }
   }
   return 0
 }
 
 function emitContextUpdate(agentName: string, session: WatchedSession, sessionId?: string) {
+  if (session.replayNow != null) return // one context_update is emitted after the replay instead of one per line
   const bd = session.contextBreakdown
   const total = bd.systemPrompt + bd.userMessages + bd.toolResults + bd.reasoning + bd.subagentResults
   broadcastEvent({
@@ -215,9 +243,9 @@ function watchSession(sessionId: string, filePath: string) {
   sessions.set(sessionId, session)
 
   const stat = fs.statSync(filePath)
-  const catchUpEntries = parser.prescanExistingContent(filePath, stat.size, session)
+  const { entries, replayLines } = parser.prepareBackfill(filePath, stat.size, session)
   session.fileSize = stat.size
-  parser.extractSessionLabel(catchUpEntries, session)
+  parser.extractSessionLabel(entries, session)
 
   broadcastSessionLifecycle('started', sessionId, session.label)
   broadcastEvent({
@@ -227,8 +255,15 @@ function watchSession(sessionId: string, filePath: string) {
   })
   session.sessionDetected = true
 
+  // Ship the whole replay as one frame: thousands of individual SSE messages
+  // would trickle onto the canvas over many animation frames and look like playback
+  replayBatch = []
+  parser.replayLines(replayLines, session, sessionId)
+  parser.advanceClock(session, Date.now()) // compress the gap between last entry and now
   emitContextUpdate(ORCHESTRATOR_NAME, session, sessionId)
-  parser.emitCatchUpEntries(catchUpEntries, session, sessionId)
+  const batch = replayBatch
+  replayBatch = null
+  if (batch.length > 0) broadcast(JSON.stringify({ type: 'agent-event-batch', events: batch }), seq)
 
   session.fileWatcher = fs.watch(filePath, (eventType) => {
     if (eventType === 'change') readNewLines(sessionId)
@@ -256,6 +291,7 @@ function readNewLines(sessionId: string) {
   const result = readNewFileLines(session.filePath, session.fileSize)
   if (!result) return
   session.fileSize = result.newSize
+  if (result.lines.length > 0) parser.advanceClock(session, Date.now())
   for (const line of result.lines) {
     parser.processTranscriptLine(line, ORCHESTRATOR_NAME, session.pendingToolCalls, session.seenToolUseIds, sessionId, session.seenMessageHashes)
   }
@@ -485,6 +521,15 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         log(`[sse] Client disconnected (${sseClients.size} total)`)
       })
 
+      // A reconnecting client sends Last-Event-ID: same boot → only what it missed;
+      // different boot (relay restarted) → tell it to reset, then send everything.
+      let afterSeq = -1
+      const lastId = String(req.headers['last-event-id'] || '')
+      if (lastId) {
+        const [boot, n] = lastId.split(':')
+        if (boot === BOOT_ID && Number.isFinite(Number(n))) afterSeq = Number(n)
+        else sendSSE(res, { type: 'reset', reason: 'relay-restarted' })
+      }
       // Send current session list (Claude + Codex)
       const sessionList: SessionInfo[] = []
       for (const session of sessions.values()) {
@@ -500,18 +545,12 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }
 
-      // Replay buffered events for the most recent active session
-      const sorted = [...sessionList].sort((a, b) => {
-        const aActive = a.status === 'active' ? 1 : 0
-        const bActive = b.status === 'active' ? 1 : 0
-        if (aActive !== bActive) return bActive - aActive
-        return b.lastActivityTime - a.lastActivityTime
-      })
-      if (sorted.length > 0) {
-        const buffered = eventBuffer.get(sorted[0].id)
-        if (buffered) {
-          sendSSE(res, { type: 'agent-event-batch', events: buffered })
-        }
+      // Replay buffered events for every session — the frontend buffers them
+      // per session and flushes on selection, so switching tabs shows history
+      // even for sessions attached before this client connected.
+      for (const s of sessionList) {
+        const buffered = (eventBuffer.get(s.id) || []).filter(b => b.seq > afterSeq)
+        if (buffered.length > 0) sendSSE(res, { type: 'agent-event-batch', events: buffered.map(b => b.event) }, buffered[buffered.length - 1].seq)
       }
     },
 

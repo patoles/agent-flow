@@ -30,6 +30,16 @@ export const PERMISSION_DETECT_MS = 5000
  *  attach within ~1s of their next message. */
 export const ACTIVE_SESSION_AGE_S = 10 * 60 // 10 minutes
 
+/** How many of the most recent user turns are replayed (tool calls, subagents,
+ *  messages) when attaching to a session that already has history. Older
+ *  turns are only pre-scanned for dedup and token accounting. */
+export const BACKFILL_TURNS = 50
+
+/** Idle gaps between replayed transcript entries longer than this are
+ *  compressed down to this length, so a session that sat idle for hours
+ *  does not produce a timeline made mostly of dead time. */
+export const MAX_REPLAY_GAP_MS = 5 * 1000
+
 /** Duration of VS Code status bar messages (ms) */
 export const STATUS_MESSAGE_DURATION_MS = 5000
 
