@@ -83,6 +83,10 @@ export interface TopBarProps {
   sessionsWithActivity: Set<string>
   onSelectSession: (id: string) => void
   onCloseSession: (id: string) => void
+  onOpenSessionManager: () => void
+  showFolder: boolean
+  customNames: Record<string, string>
+  onRenameSession: (id: string, name: string) => void
   // Connection
   isVSCode: boolean
   connectionStatus: ConnectionStatus
@@ -103,6 +107,7 @@ export interface TopBarProps {
 export const TopBar = memo(function TopBar({
   sessions, selectedSessionId, sessionsWithActivity,
   onSelectSession, onCloseSession,
+  onOpenSessionManager, showFolder, customNames, onRenameSession,
   isVSCode, connectionStatus,
   agentCount, totalTokens,
   showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
@@ -110,6 +115,12 @@ export const TopBar = memo(function TopBar({
 }: TopBarProps) {
   return (
     <div className="absolute top-3 left-3 right-3 flex items-center gap-4 font-mono text-[10px]" style={{ zIndex: Z.info }}>
+      {sessions.length > 0 && (
+        <ToggleButton active={false} onClick={onOpenSessionManager} style={{ flexShrink: 0 }}>
+          ☰ {sessions.length}
+        </ToggleButton>
+      )}
+
       {/* Session tabs — scrollable, takes available space */}
       {sessions.length > 1 && (
         <div className="min-w-0 flex-shrink overflow-x-auto scrollbar-hide">
@@ -119,6 +130,9 @@ export const TopBar = memo(function TopBar({
             sessionsWithActivity={sessionsWithActivity}
             onSelectSession={onSelectSession}
             onCloseSession={onCloseSession}
+            showFolder={showFolder}
+            customNames={customNames}
+            onRenameSession={onRenameSession}
           />
         </div>
       )}

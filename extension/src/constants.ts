@@ -101,7 +101,7 @@ export const RESULT_MAX = 200
 export const MESSAGE_MAX = 2000
 
 /** Session tab label */
-export const SESSION_LABEL_MAX = 14
+export const SESSION_LABEL_MAX = 60
 
 /** Truncated label text (label - ellipsis) */
 export const SESSION_LABEL_TRUNCATED = SESSION_LABEL_MAX - 2

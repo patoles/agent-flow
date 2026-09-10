@@ -31,6 +31,8 @@ export interface AgentEvent {
 export interface SessionInfo {
   id: string
   label: string
+  /** Working directory of the session (used to disambiguate tabs across projects) */
+  cwd?: string
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number
@@ -47,7 +49,7 @@ export type ExtensionToWebviewMessage =
   | { type: 'session-list'; sessions: SessionInfo[] }
   | { type: 'session-started'; session: SessionInfo }
   | { type: 'session-ended'; sessionId: string }
-  | { type: 'session-updated'; sessionId: string; label: string }
+  | { type: 'session-updated'; sessionId: string; label: string; cwd?: string }
 
 export interface VisualizerConfig {
   mode: 'live' | 'replay'
@@ -71,6 +73,7 @@ export interface TranscriptEntry {
   sessionId: string
   type: string
   uuid?: string
+  cwd?: string
   message: {
     role: string
     model?: string
@@ -188,6 +191,7 @@ export interface WatchedSession {
   subagentsDir: string | null
   label: string
   labelSet: boolean
+  cwd?: string
   model: string | null
   /** Maps agent names to their last emitted model ID — re-emits on model change */
   modelDetectedAgents: Map<string, string>

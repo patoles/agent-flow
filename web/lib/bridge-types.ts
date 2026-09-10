@@ -16,6 +16,7 @@ export interface AgentEvent {
 export interface SessionInfo {
   id: string
   label: string
+  cwd?: string
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number

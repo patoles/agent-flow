@@ -23,6 +23,9 @@ import { COLORS } from "@/lib/colors"
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { TopBar } from "./top-bar"
+import { SessionManagerModal } from './session-manager-modal'
+import { useSessionNames } from '@/hooks/use-session-names'
+import { shouldShowFolder } from '@/lib/session-label'
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -69,6 +72,9 @@ export function AgentVisualizer() {
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
+  const [showSessionManager, setShowSessionManager] = useState(false)
+  const { names: sessionNames, rename: renameSession } = useSessionNames()
+  const showFolder = shouldShowFolder(bridge.sessions, bridge.isVSCode)
 
   // Mutually exclusive panel toggling — opening one closes the others
   const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost') => {
@@ -406,6 +412,10 @@ export function AgentVisualizer() {
         sessionsWithActivity={bridge.sessionsWithActivity}
         onSelectSession={bridge.selectSession}
         onCloseSession={handleCloseSession}
+        onOpenSessionManager={() => setShowSessionManager(true)}
+        showFolder={showFolder}
+        customNames={sessionNames}
+        onRenameSession={renameSession}
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}
@@ -418,6 +428,19 @@ export function AgentVisualizer() {
         onTogglePanel={toggleExclusivePanel}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}
         onToggleMute={handleToggleMute}
+      />
+
+      <SessionManagerModal
+        visible={showSessionManager}
+        sessions={bridge.sessions}
+        selectedSessionId={bridge.selectedSessionId}
+        sessionsWithActivity={bridge.sessionsWithActivity}
+        showFolder={showFolder}
+        customNames={sessionNames}
+        onSelectSession={bridge.selectSession}
+        onCloseSession={handleCloseSession}
+        onRenameSession={renameSession}
+        onClose={() => setShowSessionManager(false)}
       />
     </div>
     </OpenFileProvider>

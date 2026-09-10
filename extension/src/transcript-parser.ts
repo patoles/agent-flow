@@ -32,7 +32,7 @@ export interface TranscriptParserDelegate {
   emit(event: AgentEvent, sessionId?: string): void
   elapsed(sessionId?: string): number
   getSession(sessionId: string): WatchedSession | undefined
-  fireSessionLifecycle(event: { type: 'started' | 'ended' | 'updated'; sessionId: string; label: string }): void
+  fireSessionLifecycle(event: { type: 'started' | 'ended' | 'updated'; sessionId: string; label: string; cwd?: string }): void
   emitContextUpdate(agentName: string, session: WatchedSession, sessionId?: string): void
 }
 
@@ -130,6 +130,7 @@ export class TranscriptParser {
       sessionId: parsed.sessionId as string,
       type: parsed.type as string,
       uuid: parsed.uuid as string | undefined,
+      cwd: typeof parsed.cwd === 'string' ? parsed.cwd : undefined,
       message: msg,
     }
 
@@ -561,6 +562,7 @@ export class TranscriptParser {
   extractSessionLabel(entries: TranscriptEntry[], session: WatchedSession): void {
     if (session.labelSet) return
     for (const entry of entries) {
+      if (!session.cwd && entry.cwd) session.cwd = entry.cwd
       if (entry.type !== 'user') continue
       const text = this.extractUserMessageText(entry)
       if (text) {
@@ -606,12 +608,14 @@ export class TranscriptParser {
   /** Update session label on first user message and notify the webview */
   maybeSetSessionLabel(entry: TranscriptEntry, sessionId: string): void {
     const session = this.delegate.getSession(sessionId)
-    if (!session || session.labelSet) return
+    if (!session) return
+    if (!session.cwd && entry.cwd) session.cwd = entry.cwd
+    if (session.labelSet) return
     if (entry.type !== 'user') return
     const text = this.extractUserMessageText(entry)
     if (!text) return
     session.label = this.truncateLabel(text)
     session.labelSet = true
-    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label: session.label })
+    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label: session.label, cwd: session.cwd })
   }
 }

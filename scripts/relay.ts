@@ -100,16 +100,16 @@ function broadcastEvent(event: AgentEvent) {
   broadcast(JSON.stringify({ type: 'agent-event', event }))
 }
 
-function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessionId: string, label: string) {
+function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessionId: string, label: string, cwd?: string) {
   if (type === 'started') {
     broadcast(JSON.stringify({
       type: 'session-started',
-      session: { id: sessionId, label, status: 'active', startTime: Date.now(), lastActivityTime: Date.now() } as SessionInfo,
+      session: { id: sessionId, label, cwd, status: 'active', startTime: Date.now(), lastActivityTime: Date.now() } as SessionInfo,
     }))
   } else if (type === 'ended') {
     broadcast(JSON.stringify({ type: 'session-ended', sessionId }))
   } else if (type === 'updated') {
-    broadcast(JSON.stringify({ type: 'session-updated', sessionId, label }))
+    broadcast(JSON.stringify({ type: 'session-updated', sessionId, label, cwd }))
   }
 }
 
@@ -144,7 +144,7 @@ const parser = new TranscriptParser({
   emit: emitEvent,
   elapsed,
   getSession: (sessionId: string) => sessions.get(sessionId),
-  fireSessionLifecycle: (event) => broadcastSessionLifecycle(event.type, event.sessionId, event.label),
+  fireSessionLifecycle: (event) => broadcastSessionLifecycle(event.type, event.sessionId, event.label, event.cwd),
   emitContextUpdate,
 })
 
@@ -171,7 +171,7 @@ function resetInactivityTimer(sessionId: string) {
       payload: { name: ORCHESTRATOR_NAME, isMain: true, task: session.label, ...(session.model ? { model: session.model } : {}) },
       sessionId,
     })
-    broadcastSessionLifecycle('started', sessionId, session.label)
+    broadcastSessionLifecycle('started', sessionId, session.label, session.cwd)
   }
 
   if (session.inactivityTimer) clearTimeout(session.inactivityTimer)
@@ -219,7 +219,7 @@ function watchSession(sessionId: string, filePath: string) {
   session.fileSize = stat.size
   parser.extractSessionLabel(catchUpEntries, session)
 
-  broadcastSessionLifecycle('started', sessionId, session.label)
+  broadcastSessionLifecycle('started', sessionId, session.label, session.cwd)
   broadcastEvent({
     time: 0, type: 'agent_spawn',
     payload: { name: ORCHESTRATOR_NAME, isMain: true, task: session.label, ...(session.model ? { model: session.model } : {}) },
@@ -434,7 +434,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     codexWatcher = new CodexSessionWatcher(workspace)
     codexWatcher.onEvent((event) => broadcastEvent(event))
     codexWatcher.onSessionLifecycle((lifecycle) => {
-      broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label)
+      broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label, lifecycle.cwd)
     })
     codexWatcher.start()
   }
@@ -490,7 +490,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       for (const session of sessions.values()) {
         if (!session.sessionDetected) continue
         sessionList.push({
-          id: session.sessionId, label: session.label,
+          id: session.sessionId, label: session.label, cwd: session.cwd,
           status: session.sessionCompleted ? 'completed' : 'active',
           startTime: session.sessionStartTime, lastActivityTime: session.lastActivityTime,
         })
