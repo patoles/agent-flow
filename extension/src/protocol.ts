@@ -19,6 +19,8 @@ export type AgentEventType =
   | 'subagent_dispatch'
   | 'subagent_return'
   | 'permission_requested'
+  | 'file_collision'
+  | 'context_compacted'
   | 'error'
 
 export interface AgentEvent {
@@ -31,6 +33,8 @@ export interface AgentEvent {
 export interface SessionInfo {
   id: string
   label: string
+  /** Working directory of the session (used to disambiguate tabs across projects) */
+  cwd?: string
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number
@@ -47,7 +51,7 @@ export type ExtensionToWebviewMessage =
   | { type: 'session-list'; sessions: SessionInfo[] }
   | { type: 'session-started'; session: SessionInfo }
   | { type: 'session-ended'; sessionId: string }
-  | { type: 'session-updated'; sessionId: string; label: string }
+  | { type: 'session-updated'; sessionId: string; label: string; cwd?: string }
 
 export interface VisualizerConfig {
   mode: 'live' | 'replay'
@@ -71,6 +75,7 @@ export interface TranscriptEntry {
   sessionId: string
   type: string
   uuid?: string
+  cwd?: string
   message: {
     role: string
     model?: string
@@ -162,6 +167,8 @@ export interface SubagentState {
   permissionTimer: NodeJS.Timeout | null
   permissionEmitted: boolean
   spawnEmitted: boolean
+  /** agent_complete already emitted (file-tailed subagent went idle) */
+  completeEmitted?: boolean
 }
 
 /** State tracked for a single watched Claude Code session */
@@ -188,6 +195,15 @@ export interface WatchedSession {
   subagentsDir: string | null
   label: string
   labelSet: boolean
+  cwd?: string
+  /** While replaying history: wall-clock ms of the entry being processed, so elapsed() reflects real timing */
+  replayNow?: number | null
+  /** Total idle time removed from the timeline by gap compression (ms) */
+  compressedMs?: number
+  /** Wall-clock ms of the last processed transcript entry, for gap compression */
+  lastEventWall?: number
+  /** Last value returned by elapsed(); events are never stamped earlier than this */
+  lastElapsed?: number
   model: string | null
   /** Maps agent names to their last emitted model ID — re-emits on model change */
   modelDetectedAgents: Map<string, string>

@@ -20,6 +20,14 @@ import { createLogger } from './logger'
 
 const log = createLogger('SubagentWatcher')
 
+/** A subagent transcript written within this window counts as active on attach */
+const RECENT_SUBAGENT_WRITE_MS = 60 * 1000
+
+/** A spawned file-tailed subagent whose transcript has not been written for this
+ *  long is considered finished. Covers agents whose completion never reaches the
+ *  parent transcript (Workflow tool agents, killed runs). */
+const SUBAGENT_IDLE_COMPLETE_MS = 2 * 60 * 1000
+
 export interface SubagentWatcherDelegate extends PermissionDetectionDelegate {
   getSession(sessionId: string): WatchedSession | undefined
   resetInactivityTimer(sessionId: string): void
@@ -61,15 +69,28 @@ export function scanSubagentsDir(
   const subDir = session.subagentsDir
   if (!fs.existsSync(subDir)) return
 
+  // Workflow tool agents live one level deeper: subagents/workflows/<run-id>/agent-*.jsonl.
+  // The dir watcher above is not recursive, but the poll fallback re-scans, so new
+  // workflow runs are picked up within POLL_FALLBACK_MS.
+  const dirs = [subDir]
+  const workflowsDir = path.join(subDir, 'workflows')
   try {
-    const files = fs.readdirSync(subDir)
-    for (const file of files) {
-      if (!file.endsWith('.jsonl')) continue
-      const filePath = path.join(subDir, file)
-      if (session.subagentWatchers.has(filePath)) continue
-      startWatchingSubagentFile(delegate, parser, filePath, sessionId)
+    if (fs.existsSync(workflowsDir)) {
+      for (const run of fs.readdirSync(workflowsDir)) dirs.push(path.join(workflowsDir, run))
     }
-  } catch (err) { log.debug('Subagent dir scan failed:', err) }
+  } catch (err) { log.debug('Workflow dir scan failed:', err) }
+
+  for (const dir of dirs) {
+    try {
+      const files = fs.readdirSync(dir)
+      for (const file of files) {
+        if (!file.endsWith('.jsonl')) continue
+        const filePath = path.join(dir, file)
+        if (session.subagentWatchers.has(filePath)) continue
+        startWatchingSubagentFile(delegate, parser, filePath, sessionId)
+      }
+    } catch (err) { log.debug('Subagent dir scan failed:', err) }
+  }
 }
 
 function startWatchingSubagentFile(
@@ -127,9 +148,15 @@ function startWatchingSubagentFile(
 
   // Only emit spawn for subagents that are still active (have pending work)
   // AND haven't already been spawned by the transcript parser.
+  // An agent is considered active if it has pending work OR wrote to its
+  // transcript very recently (e.g. it is thinking between tool calls) — otherwise
+  // agents attached mid-run only appear at their next tool call.
+  let recentlyActive = false
+  try { recentlyActive = Date.now() - fs.statSync(filePath).mtimeMs < RECENT_SUBAGENT_WRITE_MS } catch { /* ignore */ }
+  const isActive = pendingToolUseIds.size > 0 || recentlyActive
   const alreadySpawned = session.spawnedSubagents.has(agentName)
-  state.spawnEmitted = pendingToolUseIds.size > 0 || alreadySpawned
-  if (pendingToolUseIds.size > 0 && !alreadySpawned) {
+  state.spawnEmitted = isActive || alreadySpawned
+  if (isActive && !alreadySpawned) {
     session.spawnedSubagents.add(agentName)
     emitSubagentSpawn(delegate, ORCHESTRATOR_NAME, agentName, agentName, sessionId)
   }
@@ -154,8 +181,20 @@ export function readSubagentNewLines(
   if (!state) return
 
   const result = readNewFileLines(filePath, state.fileSize)
-  if (!result) return
+  if (!result) {
+    // No new content: complete the agent if it has gone quiet for long enough
+    if (state.spawnEmitted && !state.completeEmitted) {
+      let idleMs = 0
+      try { idleMs = Date.now() - fs.statSync(filePath).mtimeMs } catch { return }
+      if (idleMs > SUBAGENT_IDLE_COMPLETE_MS) {
+        state.completeEmitted = true
+        delegate.emit({ time: delegate.elapsed(sessionId), type: 'agent_complete', payload: { name: state.agentName } }, sessionId)
+      }
+    }
+    return
+  }
   state.fileSize = result.newSize
+  state.completeEmitted = false
 
   // If inline progress events are handling this subagent, skip event emission
   // from the file watcher to avoid duplicates. We still advance fileSize above

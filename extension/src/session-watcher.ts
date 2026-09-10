@@ -94,6 +94,7 @@ export class SessionWatcher implements AgentSessionWatcher {
     return Array.from(this.sessions.values()).map(s => ({
       id: s.sessionId,
       label: s.label,
+      cwd: s.cwd,
       status: s.sessionCompleted ? 'completed' : 'active',
       startTime: s.sessionStartTime,
       lastActivityTime: s.lastActivityTime,
@@ -417,18 +418,18 @@ export class SessionWatcher implements AgentSessionWatcher {
 
     const stat = fs.statSync(filePath)
 
-    // Pre-scan existing content for dedup IDs + collect recent entries for catch-up
-    const catchUpEntries = this.parser.prescanExistingContent(filePath, stat.size, session)
+    // Pre-scan older history for dedup IDs; keep the recent turns for replay
+    const { entries, replayLines } = this.parser.prepareBackfill(filePath, stat.size, session)
 
     // Start from current end — only process NEW events going forward
     session.fileSize = stat.size
 
-    // Extract session label from the first user message in catch-up entries
-    this.parser.extractSessionLabel(catchUpEntries, session)
+    // Extract session label from the first user message in pre-scanned entries
+    this.parser.extractSessionLabel(entries, session)
 
     // Emit session start
     this._onSessionDetected.fire(sessionId)
-    this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+    this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label, cwd: session.cwd })
 
     this.emit({
       time: 0,
@@ -442,13 +443,16 @@ export class SessionWatcher implements AgentSessionWatcher {
     }, sessionId)
     session.sessionDetected = true
 
-    // Emit initial context breakdown from prescan so the webview shows accumulated tokens
-    this.emitContextUpdate(ORCHESTRATOR_NAME, session, sessionId)
+    // Replay the recent turns through the live path so the webview shows
+    // tool calls, subagents and messages that happened before we attached.
+    // Must come before any elapsed()-timed event: the clock is only compressed
+    // as the replay advances, and an early event at "now" would push the
+    // frontend clock past every replayed one.
+    this.parser.replayLines(replayLines, session, sessionId)
+    this.parser.advanceClock(session, Date.now()) // compress the gap between last entry and now
 
-    // Emit catch-up messages for content that was already in the file when we detected
-    // the session (e.g. the first user message). These were pre-scanned for dedup/tokens
-    // but never emitted as events. Emit them now so the webview shows the full history.
-    this.parser.emitCatchUpEntries(catchUpEntries, session, sessionId)
+    // Emit context breakdown so the webview shows accumulated tokens
+    this.emitContextUpdate(ORCHESTRATOR_NAME, session, sessionId)
 
     // Watch for new content
     session.fileWatcher = fs.watch(filePath, (eventType) => {
@@ -483,6 +487,7 @@ export class SessionWatcher implements AgentSessionWatcher {
     const result = readNewFileLines(session.filePath, session.fileSize)
     if (!result) return
     session.fileSize = result.newSize
+    if (result.lines.length > 0) this.parser.advanceClock(session, Date.now())
     for (const line of result.lines) {
       this.parser.processTranscriptLine(line, ORCHESTRATOR_NAME, session.pendingToolCalls, session.seenToolUseIds, sessionId, session.seenMessageHashes)
     }
@@ -520,7 +525,7 @@ export class SessionWatcher implements AgentSessionWatcher {
           ...(session.model ? { model: session.model } : {}),
         },
       }, sessionId)
-      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'started', sessionId, label: session.label, cwd: session.cwd })
     }
 
     if (session.inactivityTimer) {
@@ -564,7 +569,11 @@ export class SessionWatcher implements AgentSessionWatcher {
     if (sessionId) {
       const session = this.sessions.get(sessionId)
       if (session) {
-        return (Date.now() - session.sessionStartTime) / 1000
+        const raw = ((session.replayNow ?? Date.now()) - session.sessionStartTime - (session.compressedMs ?? 0)) / 1000
+        // Timer- and subagent-driven emitters read the clock between advanceClock() calls;
+        // clamp so no event is ever stamped earlier than the previous one
+        session.lastElapsed = Math.max(raw, session.lastElapsed ?? 0)
+        return session.lastElapsed
       }
     }
     return 0
@@ -572,6 +581,7 @@ export class SessionWatcher implements AgentSessionWatcher {
 
   /** Emit a context_update event with cumulative token breakdown */
   private emitContextUpdate(agentName: string, session: WatchedSession, sessionId?: string): void {
+    if (session.replayNow != null) return // one context_update is emitted after the replay instead of one per line
     const bd = session.contextBreakdown
     const total = bd.systemPrompt + bd.userMessages + bd.toolResults + bd.reasoning + bd.subagentResults
     this.emit({

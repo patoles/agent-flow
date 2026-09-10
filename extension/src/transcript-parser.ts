@@ -21,19 +21,46 @@ import {
   SYSTEM_CONTENT_PREFIXES,
   generateSubagentFallbackName,
   resolveSubagentChildName,
+  BACKFILL_TURNS,
+  MAX_REPLAY_GAP_MS,
 } from './constants'
 import { summarizeInput, summarizeResult, extractInputData, detectError, buildDiscovery } from './tool-summarizer'
 import { estimateTokensFromContent, estimateTokensFromText } from './token-estimator'
 import { createLogger } from './logger'
+import { fileCollisions, touchAction } from './file-collisions'
 
 const log = createLogger('TranscriptParser')
+
+/** First line Claude Code writes as the user message after a compaction */
+const COMPACTION_PREFIX = 'This session is being continued from a previous conversation'
 
 export interface TranscriptParserDelegate {
   emit(event: AgentEvent, sessionId?: string): void
   elapsed(sessionId?: string): number
   getSession(sessionId: string): WatchedSession | undefined
-  fireSessionLifecycle(event: { type: 'started' | 'ended' | 'updated'; sessionId: string; label: string }): void
+  fireSessionLifecycle(event: { type: 'started' | 'ended' | 'updated'; sessionId: string; label: string; cwd?: string }): void
   emitContextUpdate(agentName: string, session: WatchedSession, sessionId?: string): void
+}
+
+/** Line types whose top-level timestamp reflects conversation time. Other lines
+ *  (file-history-snapshot, queue-operation, attachment...) carry nested or
+ *  out-of-order timestamps and must not drive the clock. */
+const CLOCK_LINE_TYPES = new Set(['user', 'assistant', 'progress', 'system'])
+
+/** Wall-clock ms of a conversation transcript line (top-level `timestamp` only). */
+function lineTimestamp(line: string | undefined): number | null {
+  if (!line || !line.includes('"timestamp"')) return null
+  try {
+    const parsed = JSON.parse(line) as { type?: unknown; timestamp?: unknown }
+    if (typeof parsed.type !== 'string' || !CLOCK_LINE_TYPES.has(parsed.type)) return null
+    const ts = typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN
+    return Number.isNaN(ts) ? null : ts
+  } catch { return null }
+}
+
+/** ponytail: string sniff instead of JSON.parse — tool_result entries are also type "user", exclude them */
+function isUserTurnLine(line: string): boolean {
+  return line.includes('"type":"user"') && !line.includes('"tool_result"')
 }
 
 /** Type guard: check if a value is a non-null object */
@@ -130,6 +157,7 @@ export class TranscriptParser {
       sessionId: parsed.sessionId as string,
       type: parsed.type as string,
       uuid: parsed.uuid as string | undefined,
+      cwd: typeof parsed.cwd === 'string' ? parsed.cwd : undefined,
       message: msg,
     }
 
@@ -161,6 +189,7 @@ export class TranscriptParser {
     if (typeof msg.content === 'string' && msg.content.trim()) {
       if (role === 'user' || role === 'human') {
         const text = msg.content.trim()
+        if (session && text.startsWith(COMPACTION_PREFIX)) this.handleCompaction(text, agentName, session, sessionId)
         // Skip system-injected context (continuation summaries, IDE context, etc.)
         if (!this.isSystemInjectedContent(text)) {
           const hash = entry.uuid ? `user:${entry.uuid}` : `user:${text.slice(0, HASH_PREFIX_MAX)}`
@@ -264,6 +293,24 @@ export class TranscriptParser {
     }, sessionId)
   }
 
+  /** Context compaction: the old context is gone, a summary ("relic") takes its place */
+  private handleCompaction(text: string, agentName: string, session: WatchedSession, sessionId?: string): void {
+    const before = session.contextBreakdown.systemPrompt + session.contextBreakdown.userMessages
+      + session.contextBreakdown.toolResults + session.contextBreakdown.reasoning + session.contextBreakdown.subagentResults
+    const summaryStart = text.indexOf('Summary:')
+    const summary = (summaryStart >= 0 ? text.slice(summaryStart + 'Summary:'.length) : text).trim()
+    const summaryTokens = estimateTokensFromText(text)
+    session.contextBreakdown = {
+      systemPrompt: session.contextBreakdown.systemPrompt,
+      userMessages: summaryTokens, toolResults: 0, reasoning: 0, subagentResults: 0,
+    }
+    this.delegate.emit({
+      time: this.delegate.elapsed(sessionId),
+      type: 'context_compacted',
+      payload: { agent: agentName, before, after: session.contextBreakdown.systemPrompt + summaryTokens, relic: summary.slice(0, MESSAGE_MAX) },
+    }, sessionId)
+  }
+
   handleToolUse(
     block: ToolUseBlock,
     agentName: string,
@@ -281,6 +328,8 @@ export class TranscriptParser {
       filePath,
       startTime: Date.now(),
     })
+
+    if (filePath && sessionId) this.detectFileCollision(filePath, toolName, agentName, sessionId)
 
     // Check if this is a subagent call (Task in older Claude Code, Agent in newer versions)
     if (toolName === 'Task' || toolName === 'Agent') {
@@ -305,6 +354,23 @@ export class TranscriptParser {
         inputData: extractInputData(toolName, block.input),
       },
     }, sessionId)
+  }
+
+  /** Report when this touch completes a same-file collision with another agent or session */
+  private detectFileCollision(filePath: string, toolName: string, agentName: string, sessionId: string): void {
+    const session = this.delegate.getSession(sessionId)
+    const wall = session?.replayNow ?? Date.now()
+    const collision = fileCollisions.touch(filePath, { sessionId, agent: agentName, action: touchAction(toolName), wall })
+    if (!collision) return
+    const sessions = [...new Set(collision.parties.map(p => p.sessionId))]
+    // Every involved session gets the event so each canvas/tab can show it
+    for (const sid of sessions) {
+      this.delegate.emit({
+        time: this.delegate.elapsed(sid),
+        type: 'file_collision',
+        payload: { file: collision.file, parties: collision.parties, sessions },
+      }, sid)
+    }
   }
 
   handleToolResult(
@@ -423,20 +489,76 @@ export class TranscriptParser {
   }
 
   /**
-   * Pre-scan existing file content:
-   * 1. Build seenToolUseIds dedup set (prevents re-emitting old tool calls)
-   * 2. Return all entries for catch-up emission
+   * Split existing file content for session attach:
+   * - everything before the last BACKFILL_TURNS user turns is pre-scanned only
+   *   (dedup sets + token accounting, nothing emitted)
+   * - the tail is returned as raw lines for replayLines(), which runs them
+   *   through the live path so tool calls, subagents and messages show up
+   * Also pins the session clock to the first transcript entry so replayed and
+   * live events share a real timeline.
    */
-  prescanExistingContent(filePath: string, size: number, session: WatchedSession): TranscriptEntry[] {
-    if (size === 0) { return [] }
-    const catchUpEntries: TranscriptEntry[] = []
+  prepareBackfill(filePath: string, size: number, session: WatchedSession): { entries: TranscriptEntry[]; replayLines: string[] } {
+    if (size === 0) { return { entries: [], replayLines: [] } }
+    let lines: string[]
     try {
       // Read only up to `size` bytes — the file may have grown since stat.
       // Reading beyond would add tool_use IDs to the dedup set that haven't
       // been accounted for in fileSize, causing readNewLines to silently skip them.
-      const content = readFileChunk(filePath, 0, size)
-      for (const line of content.split(/\r?\n/)) {
-        if (!line.trim()) { continue }
+      lines = readFileChunk(filePath, 0, size).split(/\r?\n/).filter(l => l.trim())
+    } catch (err) {
+      log.error('Pre-scan failed:', err)
+      return { entries: [], replayLines: [] }
+    }
+    // First line WITH a timestamp — sessions start with ai-title/mode/summary lines that carry none.
+    // Without this the replay clock would be "now", elapsed() negative, and the
+    // frontend would collapse every replayed event onto the same instant.
+    for (const line of lines) {
+      const ts = lineTimestamp(line)
+      if (ts) { session.sessionStartTime = ts; break }
+    }
+    // Seed the gap-compression clock at session start, so the stretch covered
+    // by pre-scanned (not replayed) turns collapses too instead of showing up
+    // as thousands of empty minutes before the first replayed event.
+    session.lastEventWall = session.sessionStartTime
+    let split = lines.length
+    for (let i = lines.length - 1, turns = 0; i >= 0 && turns < BACKFILL_TURNS; i--) {
+      if (isUserTurnLine(lines[i])) { turns++; split = i }
+    }
+    return { entries: this.prescanLines(lines.slice(0, split), session), replayLines: lines.slice(split) }
+  }
+
+  /** Replay historical lines through the live path, with the session clock
+   *  pinned to each entry's own timestamp so durations and the timeline are real. */
+  replayLines(lines: string[], session: WatchedSession, sessionId: string): void {
+    for (const line of lines) {
+      const ts = lineTimestamp(line)
+      if (ts) this.advanceClock(session, ts)
+      // Transcript lines are not strictly ordered (queued messages, attachments);
+      // never let the replay clock move backwards
+      session.replayNow = ts ? Math.max(ts, session.lastEventWall ?? ts) : session.lastEventWall ?? null
+      this.processTranscriptLine(line, ORCHESTRATOR_NAME, session.pendingToolCalls, session.seenToolUseIds, sessionId, session.seenMessageHashes)
+    }
+    session.replayNow = null
+  }
+
+  /** Move the session clock to `wallMs`, compressing any idle gap longer than
+   *  MAX_REPLAY_GAP_MS. elapsed() subtracts compressedMs, so replayed and live
+   *  events share one continuous timeline without dead time. Call before
+   *  processing new lines, both during replay and live. */
+  advanceClock(session: WatchedSession, wallMs: number): void {
+    wallMs = Math.min(wallMs, Date.now()) // a bogus future timestamp must not stall the clock
+    const last = session.lastEventWall
+    if (last && wallMs - last > MAX_REPLAY_GAP_MS) {
+      session.compressedMs = (session.compressedMs ?? 0) + (wallMs - last - MAX_REPLAY_GAP_MS)
+    }
+    if (!last || wallMs > last) session.lastEventWall = wallMs
+  }
+
+  /** Build dedup sets and accumulate token counts for lines that will NOT be emitted. */
+  private prescanLines(lines: string[], session: WatchedSession): TranscriptEntry[] {
+    const catchUpEntries: TranscriptEntry[] = []
+    {
+      for (const line of lines) {
         try {
           const entry = JSON.parse(line.trim()) as TranscriptEntry
           // Build dedup sets for tool_use blocks and messages + accumulate token counts
@@ -504,63 +626,15 @@ export class TranscriptParser {
         } catch (err) { log.debug('Skipping unparseable transcript line:', err) }
       }
       log.info(`Pre-scanned ${session.seenToolUseIds.size} existing tool_use IDs, ${catchUpEntries.length} entries total`)
-
-      return catchUpEntries
-    } catch (err) {
-      log.error('Pre-scan failed:', err)
-      return []
     }
-  }
-
-  /** Emit message events for pre-existing transcript entries (catch-up on session detection).
-   *  Only emits the last user message (the current turn), not the full history. */
-  emitCatchUpEntries(entries: TranscriptEntry[], session: WatchedSession, sessionId: string): void {
-    // Find the last user entry — that's the current turn
-    let lastUserIndex = -1
-    for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].type === 'user') { lastUserIndex = i; break }
-    }
-    if (lastUserIndex === -1) { return }
-    const recentEntries = entries.slice(lastUserIndex)
-
-    for (const entry of recentEntries) {
-      const role = entry.type === 'user' ? 'user' : 'assistant'
-      const msg = entry.message
-      if (!msg) { continue }
-
-      // String content (common for user messages)
-      if (typeof msg.content === 'string' && msg.content.trim()) {
-        const text = msg.content.trim()
-        if (this.isSystemInjectedContent(text)) { continue }
-        this.delegate.emit({
-          time: 0,
-          type: 'message',
-          payload: { agent: ORCHESTRATOR_NAME, role, content: text.slice(0, MESSAGE_MAX) },
-        }, sessionId)
-        continue
-      }
-
-      // Array content (text blocks, thinking blocks, tool_use blocks)
-      if (!Array.isArray(msg.content)) { continue }
-      for (const block of msg.content) {
-        if (block.type === 'text' && 'text' in block) {
-          const text = safeText(block)
-          if (text && !this.isSystemInjectedContent(text)) {
-            this.delegate.emit({
-              time: 0,
-              type: 'message',
-              payload: { agent: ORCHESTRATOR_NAME, role, content: text.slice(0, MESSAGE_MAX) },
-            }, sessionId)
-          }
-        }
-      }
-    }
+    return catchUpEntries
   }
 
   /** Extract a human-readable label from the first user message in transcript entries */
   extractSessionLabel(entries: TranscriptEntry[], session: WatchedSession): void {
     if (session.labelSet) return
     for (const entry of entries) {
+      if (!session.cwd && entry.cwd) session.cwd = entry.cwd
       if (entry.type !== 'user') continue
       const text = this.extractUserMessageText(entry)
       if (text) {
@@ -606,12 +680,14 @@ export class TranscriptParser {
   /** Update session label on first user message and notify the webview */
   maybeSetSessionLabel(entry: TranscriptEntry, sessionId: string): void {
     const session = this.delegate.getSession(sessionId)
-    if (!session || session.labelSet) return
+    if (!session) return
+    if (!session.cwd && entry.cwd) session.cwd = entry.cwd
+    if (session.labelSet) return
     if (entry.type !== 'user') return
     const text = this.extractUserMessageText(entry)
     if (!text) return
     session.label = this.truncateLabel(text)
     session.labelSet = true
-    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label: session.label })
+    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label: session.label, cwd: session.cwd })
   }
 }

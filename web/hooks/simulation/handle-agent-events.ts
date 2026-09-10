@@ -81,6 +81,7 @@ export function handleAgentSpawn(
     toolCalls: 0, timeAlive: 0,
     x, y, vx: 0, vy: 0,
     pinned: false, isMain,
+    depth: parentId ? (state.agents.get(parentId)?.depth ?? 0) + 1 : 0,
     ...(runtime ? { runtime } : {}),
     ...(model ? { model } : {}),
     task,

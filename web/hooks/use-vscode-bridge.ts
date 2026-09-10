@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { vscodeBridge, type ConnectionStatus, type AgentEvent, type SessionInfo } from '@/lib/vscode-bridge'
+import type { FileCollision } from '@/lib/bridge-types'
 import { SimulationEvent } from '@/lib/agent-types'
 
 interface BridgeHookResult {
@@ -33,6 +34,8 @@ interface BridgeHookResult {
   sessionsWithActivity: Set<string>
   /** Remove a session from the list */
   removeSession: (sessionId: string) => void
+  /** Live same-file collisions keyed by file path */
+  collisions: Map<string, FileCollision>
 }
 
 /**
@@ -43,6 +46,8 @@ interface BridgeHookResult {
  * Supports multi-session: events are buffered per-session so switching
  * sessions replays the correct event history.
  */
+const COLLISION_TTL_MS = 90 * 1000
+
 export function useVSCodeBridge(): BridgeHookResult {
   const [isVSCode, setIsVSCode] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
@@ -62,6 +67,20 @@ export function useVSCodeBridge(): BridgeHookResult {
    *  Prevents the animation frame from processing events in the wrong simulation context. */
   const sessionSwitchPendingRef = useRef(false)
   const [sessionsWithActivity, setSessionsWithActivity] = useState<Set<string>>(new Set())
+  /** Live same-file collisions across all sessions, keyed by file; expire after COLLISION_TTL_MS */
+  const [collisions, setCollisions] = useState<Map<string, FileCollision>>(new Map())
+  useEffect(() => {
+    const t = setInterval(() => {
+      setCollisions(prev => {
+        const now = Date.now()
+        let changed = false
+        const next = new Map(prev)
+        for (const [k, c] of prev) if (now - c.seenAt > COLLISION_TTL_MS) { next.delete(k); changed = true }
+        return changed ? next : prev
+      })
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
 
   // Connect to standalone dev relay server via SSE when not in VS Code
   useEffect(() => {
@@ -112,6 +131,16 @@ export function useVSCodeBridge(): BridgeHookResult {
     // selectedSessionIdRef is updated synchronously (not via React state) so it's
     // always current even before React re-renders.
     const unsubEvent = bridge.onEvent((event: AgentEvent) => {
+      if (event.type === 'file_collision') {
+        // Global, not per-session: the same collision arrives once per involved session
+        const p = event.payload as { file: string; parties: FileCollision['parties']; sessions: string[] }
+        setCollisions(prev => {
+          const next = new Map(prev)
+          next.set(p.file, { file: p.file, parties: p.parties, sessions: p.sessions, seenAt: Date.now() })
+          return next
+        })
+        return
+      }
       const simEvent: SimulationEvent = {
         time: event.time,
         type: event.type as SimulationEvent['type'],
@@ -124,6 +153,13 @@ export function useVSCodeBridge(): BridgeHookResult {
         const buf = sessionEventsRef.current.get(event.sessionId) || []
         buf.push(simEvent)
         sessionEventsRef.current.set(event.sessionId, buf)
+        // Keep lastActivityTime roughly current (throttled: one state update per 5s per session)
+        const now = Date.now()
+        setSessions(prev => {
+          const s = prev.find(x => x.id === event.sessionId)
+          if (!s || now - s.lastActivityTime < 5000) return prev
+          return prev.map(x => x.id === event.sessionId ? { ...x, lastActivityTime: now } : x)
+        })
       }
 
       // Deliver to pending if session matches (ref is always current).
@@ -212,7 +248,10 @@ export function useVSCodeBridge(): BridgeHookResult {
           }
           return [...prev, session]
         })
-        // Auto-select newly started session.
+        // Auto-select only when nothing is selected yet: stealing focus every time
+        // another project starts a session is disruptive with many sessions.
+        // (This also covers the resume case where 'started' re-fires for the selected id.)
+        if (selectedSessionIdRef.current) return
         // Set switch-pending flag to prevent the animation frame from processing
         // events in the wrong simulation state before useLayoutEffect swaps it.
         sessionSwitchPendingRef.current = true
@@ -220,9 +259,9 @@ export function useVSCodeBridge(): BridgeHookResult {
         selectedSessionIdRef.current = session.id
         setSelectedSessionId(session.id)
       } else if (type === 'updated') {
-        const { sessionId, label } = data as { sessionId: string; label: string }
+        const { sessionId, label, cwd } = data as { sessionId: string; label: string; cwd?: string }
         setSessions(prev => prev.map(s =>
-          s.id === sessionId ? { ...s, label } : s
+          s.id === sessionId ? { ...s, label, cwd: cwd ?? s.cwd } : s
         ))
       } else if (type === 'ended') {
         const sessionId = data as string
@@ -315,5 +354,6 @@ export function useVSCodeBridge(): BridgeHookResult {
     getSessionEventCount,
     sessionsWithActivity,
     removeSession,
+    collisions,
   }
 }

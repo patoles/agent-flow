@@ -4,10 +4,15 @@ import { AudioEngine } from '@/lib/audio-engine'
 import type { Agent, ToolCallNode } from '@/lib/agent-types'
 import { detectStateChanges } from '@/components/agent-visualizer/canvas/detect-state-changes'
 
+/** More simultaneous transitions than this means history replay, not live activity */
+const REPLAY_BURST_THRESHOLD = 3
+
 export function useAudioEffects(
   agents: Map<string, Agent>,
   toolCalls: Map<string, ToolCallNode>,
   isReviewing: boolean,
+  /** Play (and thus record) sounds even in review mode — used by the timeline export */
+  forceOn = false,
 ) {
   const audioRef = useRef<AudioEngine | null>(null)
   const [isMuted, setIsMuted] = useState(true)
@@ -31,7 +36,7 @@ export function useAudioEffects(
 
   // Detect tool/agent state transitions and play sounds (live mode only)
   useEffect(() => {
-    if (seekingRef.current || !audioRef.current || isReviewing) return
+    if (seekingRef.current || !audioRef.current || (isReviewing && !forceOn)) return
     const audio = audioRef.current
 
     const { transitions, newAgentStates, newToolStates } = detectStateChanges(
@@ -40,6 +45,9 @@ export function useAudioEffects(
     )
     prevAgentStatesRef.current = newAgentStates
     prevToolStatesRef.current = newToolStates
+
+    // A burst of transitions means history is being replayed, not live activity — stay quiet
+    if (transitions.length > REPLAY_BURST_THRESHOLD) return
 
     for (const t of transitions) {
       switch (t.kind) {
@@ -50,7 +58,7 @@ export function useAudioEffects(
         case 'tool_error':    audio.playError(); break
       }
     }
-  }, [agents, toolCalls, isReviewing])
+  }, [agents, toolCalls, isReviewing, forceOn])
 
   const handleToggleMute = useCallback(() => {
     if (audioRef.current) {
@@ -60,5 +68,5 @@ export function useAudioEffects(
     }
   }, [])
 
-  return { isMuted, seekingRef, handleToggleMute }
+  return { isMuted, seekingRef, handleToggleMute, audioRef }
 }

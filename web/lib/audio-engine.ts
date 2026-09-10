@@ -7,7 +7,11 @@
 
 export class AudioEngine {
   private ctx: AudioContext | null = null
+  /** Sounds connect here at full volume; feeds both the speakers (via outputGain) and the recorder tap */
   private masterGain: GainNode | null = null
+  /** Mute stage for the speakers only, so an export still captures sound while muted */
+  private outputGain: GainNode | null = null
+  private recordDest: MediaStreamAudioDestinationNode | null = null
   private _muted = true  // default muted
   private _volume = 0.5
 
@@ -18,16 +22,30 @@ export class AudioEngine {
     }
     this.ctx = new AudioContext()
     this.masterGain = this.ctx.createGain()
-    this.masterGain.gain.value = this._muted ? 0 : this._volume
-    this.masterGain.connect(this.ctx.destination)
+    this.masterGain.gain.value = this._volume
+    this.outputGain = this.ctx.createGain()
+    this.outputGain.gain.value = this._muted ? 0 : 1
+    this.masterGain.connect(this.outputGain)
+    this.outputGain.connect(this.ctx.destination)
+  }
+
+  /** Audio stream carrying every sound the engine plays, independent of mute — for MediaRecorder */
+  recordingStream(): MediaStream | null {
+    this.ensureContext()
+    if (!this.ctx || !this.masterGain) return null
+    if (!this.recordDest) {
+      this.recordDest = this.ctx.createMediaStreamDestination()
+      this.masterGain.connect(this.recordDest)
+    }
+    return this.recordDest.stream
   }
 
   get muted() { return this._muted }
 
   setMuted(muted: boolean) {
     this._muted = muted
-    if (this.masterGain) {
-      this.masterGain.gain.setTargetAtTime(muted ? 0 : this._volume, this.ctx!.currentTime, 0.05)
+    if (this.outputGain) {
+      this.outputGain.gain.setTargetAtTime(muted ? 0 : 1, this.ctx!.currentTime, 0.05)
     }
   }
 

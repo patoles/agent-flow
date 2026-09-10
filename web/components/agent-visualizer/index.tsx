@@ -23,6 +23,13 @@ import { COLORS } from "@/lib/colors"
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { TopBar } from "./top-bar"
+import { SessionManagerModal } from './session-manager-modal'
+import { useSessionNames } from '@/hooks/use-session-names'
+import { shouldShowFolder } from '@/lib/session-label'
+import { AUTOFIT_PREF_KEY } from "@/lib/canvas-constants"
+import { useTimelineExport } from "@/hooks/use-timeline-export"
+import { StatusSidebar } from "./status-sidebar"
+import { DeadLetterPanel } from "./dead-letter-panel"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -47,6 +54,7 @@ export function AgentVisualizer() {
     restart,
     setSpeed,
     seekToTime,
+    skipTo,
     updateAgentPosition,
     saveSnapshot,
     restoreSnapshot,
@@ -69,17 +77,34 @@ export function AgentVisualizer() {
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
+  const [showSessionManager, setShowSessionManager] = useState(false)
+  const { names: sessionNames, rename: renameSession } = useSessionNames()
+  const showFolder = shouldShowFolder(bridge.sessions, bridge.isVSCode)
+  const [showDeadLetters, setShowDeadLetters] = useState(false)
 
   // Mutually exclusive panel toggling — opening one closes the others
-  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost') => {
+  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost' | 'dead') => {
+    setShowDeadLetters(prev => panel === 'dead' ? !prev : false)
     setShowFileAttention(prev => panel === 'files' ? !prev : false)
     setShowTranscript(prev => panel === 'transcript' ? !prev : false)
     setShowCostOverlay(prev => panel === 'cost' ? !prev : false)
   }, [])
   const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0)
+  // Off by default: with many agents a camera that keeps re-fitting fights the user.
+  const [autoFit, setAutoFit] = useState(() => {
+    try { return localStorage.getItem(AUTOFIT_PREF_KEY) === 'on' } catch { return false }
+  })
+  const toggleAutoFit = useCallback(() => {
+    setAutoFit(prev => {
+      try { localStorage.setItem(AUTOFIT_PREF_KEY, prev ? 'off' : 'on') } catch { /* ignore */ }
+      return !prev
+    })
+  }, [])
 
   const [isReviewing, setIsReviewing] = useState(false)
-  const { isMuted, seekingRef, handleToggleMute } = useAudioEffects(agents, toolCalls, isReviewing)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportOverlay, setExportOverlay] = useState<string | null>(null)
+  const { isMuted, seekingRef, handleToggleMute, audioRef } = useAudioEffects(agents, toolCalls, isReviewing, isExporting)
 
   // Auto-play on mount
   useEffect(() => {
@@ -94,7 +119,15 @@ export function AgentVisualizer() {
   const sessionCacheRef = useRef<Map<string, { snapshot: ReturnType<typeof saveSnapshot>; eventCount: number }>>(new Map())
   const prevSelectedRef = useRef<string | null>(null)
   useLayoutEffect(() => {
+    if (bridge.selectedSessionId === null && prevSelectedRef.current !== null) {
+      // Bridge reset (panel reopened / relay restarted): cached snapshots are stale
+      sessionCacheRef.current.clear()
+      prevSelectedRef.current = null
+      return
+    }
     if (bridge.selectedSessionId && bridge.selectedSessionId !== prevSelectedRef.current) {
+      // Review/scrub state is per-component, not per-session: the incoming tab is restored live
+      setIsReviewing(false)
       // Save outgoing session state (if any)
       if (prevSelectedRef.current !== null) {
         sessionCacheRef.current.set(prevSelectedRef.current, {
@@ -181,6 +214,25 @@ export function AgentVisualizer() {
     restart(true)
   }, [restart])
 
+  const timelineExport = useTimelineExport({
+    getCanvas: () => document.querySelector<HTMLCanvasElement>('canvas[data-agent-canvas]'),
+    getAudioStream: () => audioRef.current?.recordingStream() ?? null,
+    getCurrentTime: () => frameRef.current.currentTime,
+    getMaxTime: () => frameRef.current.maxTimeReached,
+    getNextEventTime: () => {
+      const st = frameRef.current
+      return st.eventIndex < st.eventLog.length ? st.eventLog[st.eventIndex].time : null
+    },
+    seekToTime, skipTo, play, pause,
+    setOverlay: setExportOverlay,
+    onDone: handleResumeLive,
+  })
+  useEffect(() => { setIsExporting(timelineExport.isExporting) }, [timelineExport.isExporting])
+  const handleToggleExport = useCallback(() => {
+    if (timelineExport.isExporting) timelineExport.stopExport()
+    else { setIsReviewing(true); timelineExport.startExport() }
+  }, [timelineExport])
+
   // Keyboard shortcuts
   const keyboardActions = useMemo(() => ({
     togglePlayPause: handlePlayPause,
@@ -232,6 +284,7 @@ export function AgentVisualizer() {
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
     ] : [
       { label: '🔍  Zoom to Fit', onClick: () => setZoomToFitTrigger(n => n + 1) },
+      { label: `${autoFit ? '☑' : '☐'}  Auto-fit`, onClick: toggleAutoFit },
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
       { label: '⬡  Toggle Grid', onClick: () => setShowHexGrid(prev => !prev) },
       { label: '', onClick: () => {}, separator: true },
@@ -255,6 +308,24 @@ export function AgentVisualizer() {
   }, [bridge])
 
   const isEmpty = agents.size === 0 && !bridge.useMockData
+  const deadLetterCount = useMemo(() => { let n = 0; for (const tc of toolCalls.values()) if (tc.state === 'error') n++; return n }, [toolCalls])
+
+  // Collisions touching this session: trails between the local agents involved
+  const allCollisions = useMemo(() => Array.from(bridge.collisions.values()), [bridge.collisions])
+  const canvasCollisions = useMemo(() => {
+    const sid = bridge.selectedSessionId
+    if (!sid) return []
+    const now = Date.now()
+    return allCollisions
+      .filter(c => c.sessions.includes(sid))
+      .map(c => ({
+        file: c.file,
+        agents: [...new Set(c.parties.filter(p => p.sessionId === sid).map(p => p.agent))],
+        crossSession: c.sessions.length > 1,
+        freshness: Math.max(0, 1 - (now - c.seenAt) / 90_000),
+      }))
+      .filter(c => c.agents.length >= 2)
+  }, [allCollisions, bridge.selectedSessionId])
 
   return (
     <OpenFileProvider value={bridge.isVSCode ? openFile : null}>
@@ -278,6 +349,7 @@ export function AgentVisualizer() {
         showHexGrid={showHexGrid}
         zoomToFitTrigger={zoomToFitTrigger}
         pauseAutoFit={selection.contextMenu !== null}
+        autoFit={autoFit}
         onAgentClick={selection.handleAgentClick}
         onAgentHover={selection.setHoveredAgentId}
         onAgentDrag={updateAgentPosition}
@@ -287,6 +359,8 @@ export function AgentVisualizer() {
         onDiscoveryClick={selection.handleDiscoveryClick}
         selectedDiscoveryId={selection.selectedDiscoveryId}
         showCostOverlay={showCostOverlay}
+        overlayText={exportOverlay}
+        collisions={canvasCollisions}
       />
 
       {/* Message feed panel (top-left) */}
@@ -376,6 +450,13 @@ export function AgentVisualizer() {
       />
 
       {/* File attention panel (slide-in from right) */}
+      <DeadLetterPanel
+        visible={showDeadLetters}
+        toolCalls={toolCalls}
+        onClose={() => setShowDeadLetters(false)}
+        onSelectToolCall={selection.handleToolCallClick}
+      />
+
       <FileAttentionPanel
         visible={showFileAttention}
         fileAttention={fileAttention}
@@ -399,6 +480,19 @@ export function AgentVisualizer() {
         onClose={() => setShowTimeline(false)}
       />
 
+      <StatusSidebar
+        collisions={allCollisions}
+        sessions={bridge.sessions}
+        selectedSessionId={bridge.selectedSessionId}
+        agents={agents}
+        toolCalls={toolCalls}
+        fileAttention={fileAttention}
+        onSelectSession={bridge.selectSession}
+        onOpenDeadLetters={() => toggleExclusivePanel('dead')}
+        onOpenFiles={() => toggleExclusivePanel('files')}
+        hidden={showFileAttention || showTranscript || showDeadLetters || bridge.useMockData}
+      />
+
       {/* Top bar: session tabs + info/controls */}
       <TopBar
         sessions={bridge.sessions}
@@ -406,18 +500,43 @@ export function AgentVisualizer() {
         sessionsWithActivity={bridge.sessionsWithActivity}
         onSelectSession={bridge.selectSession}
         onCloseSession={handleCloseSession}
+        onOpenSessionManager={() => setShowSessionManager(true)}
+        showFolder={showFolder}
+        customNames={sessionNames}
+        onRenameSession={renameSession}
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}
         totalTokens={totalTokens}
         showFileAttention={showFileAttention}
         showTranscript={showTranscript}
+        showDeadLetters={showDeadLetters}
+        deadLetterCount={deadLetterCount}
         showCostOverlay={showCostOverlay}
         showTimeline={showTimeline}
         isMuted={isMuted}
         onTogglePanel={toggleExclusivePanel}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}
+        autoFit={autoFit}
+        onToggleAutoFit={toggleAutoFit}
         onToggleMute={handleToggleMute}
+        isExporting={timelineExport.isExporting}
+        exportProgress={timelineExport.progress}
+        exportResult={timelineExport.lastResult}
+        onToggleExport={handleToggleExport}
+      />
+
+      <SessionManagerModal
+        visible={showSessionManager}
+        sessions={bridge.sessions}
+        selectedSessionId={bridge.selectedSessionId}
+        sessionsWithActivity={bridge.sessionsWithActivity}
+        showFolder={showFolder}
+        customNames={sessionNames}
+        onSelectSession={bridge.selectSession}
+        onCloseSession={handleCloseSession}
+        onRenameSession={renameSession}
+        onClose={() => setShowSessionManager(false)}
       />
     </div>
     </OpenFileProvider>

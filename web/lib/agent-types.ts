@@ -28,6 +28,9 @@ export interface Agent {
   vy: number
   pinned: boolean
   isMain: boolean
+  /** Nesting level: 0 for the orchestrator, parent.depth + 1 for subagents.
+   *  Drives the Flatland shape rule (fewer sides the deeper you go). */
+  depth?: number
   /** Which agent runtime produced this agent — used to pick the brand logo.
    *  Optional for forward compat with events that don't carry it (defaults to 'claude'). */
   runtime?: 'claude' | 'codex'
@@ -161,6 +164,8 @@ export interface SimulationEvent {
     | 'subagent_dispatch'
     | 'subagent_return'
     | 'permission_requested'
+    | 'file_collision'
+    | 'context_compacted'
   payload: Record<string, unknown>
   sessionId?: string
 }
