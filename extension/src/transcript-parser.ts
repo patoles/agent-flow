@@ -28,6 +28,9 @@ import { createLogger } from './logger'
 
 const log = createLogger('TranscriptParser')
 
+/** First line Claude Code writes as the user message after a compaction */
+const COMPACTION_PREFIX = 'This session is being continued from a previous conversation'
+
 export interface TranscriptParserDelegate {
   emit(event: AgentEvent, sessionId?: string): void
   elapsed(sessionId?: string): number
@@ -161,6 +164,7 @@ export class TranscriptParser {
     if (typeof msg.content === 'string' && msg.content.trim()) {
       if (role === 'user' || role === 'human') {
         const text = msg.content.trim()
+        if (session && text.startsWith(COMPACTION_PREFIX)) this.handleCompaction(text, agentName, session, sessionId)
         // Skip system-injected context (continuation summaries, IDE context, etc.)
         if (!this.isSystemInjectedContent(text)) {
           const hash = entry.uuid ? `user:${entry.uuid}` : `user:${text.slice(0, HASH_PREFIX_MAX)}`
@@ -261,6 +265,24 @@ export class TranscriptParser {
         role: 'thinking',
         content: thinking ? thinking.slice(0, MESSAGE_MAX) : REDACTED_THINKING_LABEL,
       },
+    }, sessionId)
+  }
+
+  /** Context compaction: the old context is gone, a summary ("relic") takes its place */
+  private handleCompaction(text: string, agentName: string, session: WatchedSession, sessionId?: string): void {
+    const before = session.contextBreakdown.systemPrompt + session.contextBreakdown.userMessages
+      + session.contextBreakdown.toolResults + session.contextBreakdown.reasoning + session.contextBreakdown.subagentResults
+    const summaryStart = text.indexOf('Summary:')
+    const summary = (summaryStart >= 0 ? text.slice(summaryStart + 'Summary:'.length) : text).trim()
+    const summaryTokens = estimateTokensFromText(text)
+    session.contextBreakdown = {
+      systemPrompt: session.contextBreakdown.systemPrompt,
+      userMessages: summaryTokens, toolResults: 0, reasoning: 0, subagentResults: 0,
+    }
+    this.delegate.emit({
+      time: this.delegate.elapsed(sessionId),
+      type: 'context_compacted',
+      payload: { agent: agentName, before, after: session.contextBreakdown.systemPrompt + summaryTokens, relic: summary.slice(0, MESSAGE_MAX) },
     }, sessionId)
   }
 

@@ -23,6 +23,7 @@ import { COLORS } from "@/lib/colors"
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { TopBar } from "./top-bar"
+import { DeadLetterPanel } from "./dead-letter-panel"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -69,9 +70,11 @@ export function AgentVisualizer() {
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
+  const [showDeadLetters, setShowDeadLetters] = useState(false)
 
   // Mutually exclusive panel toggling — opening one closes the others
-  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost') => {
+  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost' | 'dead') => {
+    setShowDeadLetters(prev => panel === 'dead' ? !prev : false)
     setShowFileAttention(prev => panel === 'files' ? !prev : false)
     setShowTranscript(prev => panel === 'transcript' ? !prev : false)
     setShowCostOverlay(prev => panel === 'cost' ? !prev : false)
@@ -255,6 +258,7 @@ export function AgentVisualizer() {
   }, [bridge])
 
   const isEmpty = agents.size === 0 && !bridge.useMockData
+  const deadLetterCount = useMemo(() => { let n = 0; for (const tc of toolCalls.values()) if (tc.state === 'error') n++; return n }, [toolCalls])
 
   return (
     <OpenFileProvider value={bridge.isVSCode ? openFile : null}>
@@ -376,6 +380,13 @@ export function AgentVisualizer() {
       />
 
       {/* File attention panel (slide-in from right) */}
+      <DeadLetterPanel
+        visible={showDeadLetters}
+        toolCalls={toolCalls}
+        onClose={() => setShowDeadLetters(false)}
+        onSelectToolCall={selection.handleToolCallClick}
+      />
+
       <FileAttentionPanel
         visible={showFileAttention}
         fileAttention={fileAttention}
@@ -412,6 +423,8 @@ export function AgentVisualizer() {
         totalTokens={totalTokens}
         showFileAttention={showFileAttention}
         showTranscript={showTranscript}
+        showDeadLetters={showDeadLetters}
+        deadLetterCount={deadLetterCount}
         showCostOverlay={showCostOverlay}
         showTimeline={showTimeline}
         isMuted={isMuted}
