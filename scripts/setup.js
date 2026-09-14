@@ -8,7 +8,7 @@
  *
  * What it does:
  *   1. Installs the hook forwarding script at ~/.claude/agent-flow/hook.js
- *   2. Configures Claude Code hooks in ~/.claude/settings.json
+ *   2. Configures Claude Code hooks in settings.json under every config dir
  */
 'use strict'
 
@@ -17,9 +17,30 @@ const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
 
+// Agent Flow's own directory, deliberately NOT derived from CLAUDE_CONFIG_DIR —
+// see the note on DISCOVERY_DIR in scripts/relay.ts. One fixed location means a
+// single installed hook.js serves every account.
 const DISCOVERY_DIR = path.join(os.homedir(), '.claude', 'agent-flow')
 const HOOK_SCRIPT_PATH = path.join(DISCOVERY_DIR, 'hook.js')
-const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json')
+
+// Mirrors claudeConfigDirs() in extension/src/claude-home.ts. Duplicated because
+// this file runs as plain CommonJS under `node scripts/setup.js`, with no
+// TypeScript loader available to import the shared helper.
+function claudeSettingsPaths() {
+  const expandTilde = (p) => {
+    if (p === '~') return os.homedir()
+    if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2))
+    return p
+  }
+  const dirs = (process.env.CLAUDE_CONFIG_DIR || '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+    .map(entry => path.resolve(expandTilde(entry)))
+  const unique = [...new Set(dirs)]
+  const roots = unique.length > 0 ? unique : [path.join(os.homedir(), '.claude')]
+  return roots.map(dir => path.join(dir, 'settings.json'))
+}
 
 const HOOK_TIMEOUT_S = 2
 const HOOK_SAFETY_MARGIN_MS = 500
@@ -168,41 +189,42 @@ function configureHooks() {
     'SubagentStart', 'SubagentStop', 'Notification', 'Stop', 'SessionEnd',
   ]
 
-  let settings = {}
-  try {
-    if (fs.existsSync(SETTINGS_PATH)) {
-      settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'))
+  // Every config dir needs its own registration: a session started under one
+  // never reads another's settings.json, so skipping any leaves that account
+  // with transcripts but no live hook events.
+  for (const settingsPath of claudeSettingsPaths()) {
+    let settings = {}
+    try {
+      if (fs.existsSync(settingsPath)) {
+        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+      }
+    } catch {
+      console.log('Could not read existing settings, starting fresh:', settingsPath)
     }
-  } catch {
-    console.log('Could not read existing settings, starting fresh')
-  }
 
-  const existingHooks = settings.hooks || {}
-  for (const event of events) {
-    const existing = existingHooks[event] || []
-    const filtered = existing.filter(entry => !isAgentFlowHook(entry))
-    existingHooks[event] = [...filtered, hookEntry]
-  }
-  settings.hooks = existingHooks
+    const existingHooks = settings.hooks || {}
+    for (const event of events) {
+      const existing = existingHooks[event] || []
+      const filtered = existing.filter(entry => !isAgentFlowHook(entry))
+      existingHooks[event] = [...filtered, hookEntry]
+    }
+    settings.hooks = existingHooks
 
-  const dir = path.dirname(SETTINGS_PATH)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
+    const dir = path.dirname(settingsPath)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+    console.log('Configured Claude Code hooks in:', settingsPath)
   }
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n')
-  console.log('Configured Claude Code hooks in:', SETTINGS_PATH)
 }
 
 // ─── Detection ──────────────────────────────────────────────────────────────
 
-function isAlreadySetup() {
-  // Check hook script exists
-  if (!fs.existsSync(HOOK_SCRIPT_PATH)) return false
-
-  // Check hooks are configured in settings.json
+function hasAgentFlowHooks(settingsPath) {
   try {
-    if (!fs.existsSync(SETTINGS_PATH)) return false
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'))
+    if (!fs.existsSync(settingsPath)) return false
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
     const hooks = settings.hooks
     if (!hooks || typeof hooks !== 'object') return false
     return Object.values(hooks).some(entries => {
@@ -212,6 +234,15 @@ function isAlreadySetup() {
   } catch {
     return false
   }
+}
+
+function isAlreadySetup() {
+  // Check hook script exists
+  if (!fs.existsSync(HOOK_SCRIPT_PATH)) return false
+
+  // Every config dir must be configured, not just one — otherwise a first run
+  // against ~/.claude would make later runs skip a newly added config dir.
+  return claudeSettingsPaths().every(hasAgentFlowHooks)
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────

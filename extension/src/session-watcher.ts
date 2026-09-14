@@ -1,7 +1,6 @@
 import * as vscode from 'vscode'
 import * as fs from 'fs'
 import * as path from 'path'
-import * as os from 'os'
 import { AgentEvent, SessionInfo, WatchedSession } from './protocol'
 import {
   INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
@@ -12,6 +11,7 @@ import { TranscriptParser } from './transcript-parser'
 import { readNewFileLines, foldPathCase } from './fs-utils'
 import { handlePermissionDetection } from './permission-detection'
 import { scanSubagentsDir, readSubagentNewLines } from './subagent-watcher'
+import { claudeProjectDirs } from './claude-home'
 import { createLogger } from './logger'
 
 const log = createLogger('SessionWatcher')
@@ -23,7 +23,10 @@ const log = createLogger('SessionWatcher')
  * with independent state for tool call tracking, dedup, and subagent watchers.
  *
  * Claude Code writes full conversation transcripts to:
- *   ~/.claude/projects/<encoded-project-path>/<session-uuid>.jsonl
+ *   <config-dir>/projects/<encoded-project-path>/<session-uuid>.jsonl
+ *
+ * <config-dir> is ~/.claude unless CLAUDE_CONFIG_DIR overrides it; every root it
+ * names is watched, so sessions from several accounts show up side by side.
  *
  * Each line is a JSON object with:
  *   { sessionId, type, message: { role: "assistant"|"user", content: [...] } }
@@ -37,10 +40,8 @@ const log = createLogger('SessionWatcher')
 // WatchedSession and SubagentState are defined in protocol.ts and re-exported here for convenience
 export type { WatchedSession, SubagentState } from './protocol'
 
-const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects')
-
 export class SessionWatcher implements AgentSessionWatcher {
-  private dirWatcher: fs.FSWatcher | null = null
+  private rootWatchers: fs.FSWatcher[] = []
   private dirWatchers = new Map<string, fs.FSWatcher>()
   private sessions = new Map<string, WatchedSession>()
   private workspacePath: string | null = null
@@ -166,8 +167,8 @@ export class SessionWatcher implements AgentSessionWatcher {
     this.scanForActiveSessions()
 
     // Watch project directories for instant new-file detection.
-    // Watch both the exact workspace dir and the parent CLAUDE_DIR (to detect
-    // new subdirectory project dirs, e.g. CLI sessions started from a subfolder).
+    // Watch both the exact workspace dir and each config root (to detect new
+    // subdirectory project dirs, e.g. CLI sessions started from a subfolder).
     this.watchProjectDirs()
 
     // Re-scan periodically as fallback (1s instead of 3s for faster detection)
@@ -176,30 +177,30 @@ export class SessionWatcher implements AgentSessionWatcher {
     }, SCAN_INTERVAL_MS)
   }
 
-  /** Set up fs.watch on known project directories and the parent CLAUDE_DIR */
+  /** Set up fs.watch on known project directories and on each config root */
   private watchProjectDirs(): void {
-    // Watch the exact workspace project dir
-    if (this.workspacePath) {
-      const projectDir = path.join(CLAUDE_DIR, this.workspacePath)
-      this.watchDirForJsonl(projectDir)
-    }
+    if (!this.workspacePath) return
 
-    // Watch CLAUDE_DIR itself so we detect new subdirectory project dirs
-    // (e.g. when a CLI session starts in a subfolder and creates a new project dir)
-    if (this.workspacePath && fs.existsSync(CLAUDE_DIR)) {
+    for (const root of claudeProjectDirs()) {
+      // Watch the exact workspace project dir under this root
+      this.watchDirForJsonl(path.join(root, this.workspacePath))
+
+      // Watch the root itself so we detect new subdirectory project dirs
+      // (e.g. when a CLI session starts in a subfolder and creates a new project dir)
+      if (!fs.existsSync(root)) continue
       try {
-        this.dirWatcher = fs.watch(CLAUDE_DIR, (_eventType, filename) => {
+        this.rootWatchers.push(fs.watch(root, (_eventType, filename) => {
           if (!filename) return
           // A new project dir appeared — check if it's a subdirectory of our workspace
-          const dirPath = path.join(CLAUDE_DIR, filename)
+          const dirPath = path.join(root, filename)
           try {
-            if (fs.statSync(dirPath).isDirectory() && this.isContainedProject(filename)) {
+            if (fs.statSync(dirPath).isDirectory() && this.isContainedProject(dirPath, filename)) {
               this.watchDirForJsonl(dirPath)
               this.scanForActiveSessions()
             }
           } catch { /* stat may fail for transient files */ }
-        })
-      } catch (err) { log.debug('CLAUDE_DIR watch failed:', err) }
+        }))
+      } catch (err) { log.debug('Config root watch failed:', err) }
     }
   }
 
@@ -220,20 +221,24 @@ export class SessionWatcher implements AgentSessionWatcher {
     } catch (err) { log.debug('Dir watch failed (may not exist yet):', err) }
   }
 
-  /** Find the actual on-disk project dir name under CLAUDE_DIR for an encoded
-   *  workspace path. On Windows the lookup is case-insensitive (VS Code reports
-   *  `c:\...` while Claude Code encodes `C--...`) and returns the real casing.
-   *  Returns null when no matching directory exists. */
+  /** Find the actual on-disk project dir name for an encoded workspace path,
+   *  searching every config root and returning the first hit. On Windows the
+   *  lookup is case-insensitive (VS Code reports `c:\...` while Claude Code
+   *  encodes `C--...`) and returns the real casing. Returns null when no root
+   *  has a matching directory. */
   private findProjectDirName(encoded: string): string | null {
-    if (process.platform !== 'win32') {
-      return fs.existsSync(path.join(CLAUDE_DIR, encoded)) ? encoded : null
-    }
-    try {
-      const folded = encoded.toLowerCase()
-      for (const entry of fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })) {
-        if (entry.isDirectory() && entry.name.toLowerCase() === folded) return entry.name
+    for (const root of claudeProjectDirs()) {
+      if (process.platform !== 'win32') {
+        if (fs.existsSync(path.join(root, encoded))) return encoded
+        continue
       }
-    } catch { /* CLAUDE_DIR may not exist yet */ }
+      try {
+        const folded = encoded.toLowerCase()
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+          if (entry.isDirectory() && entry.name.toLowerCase() === folded) return entry.name
+        }
+      } catch { /* root may not exist yet */ }
+    }
     return null
   }
 
@@ -242,27 +247,28 @@ export class SessionWatcher implements AgentSessionWatcher {
    *  so instead of trying to decode it, we read the cwd from the JSONL files
    *  in the directory — that's the authoritative source of truth.
    *  Results are cached since a project dir's cwd never changes. */
-  private isContainedProject(encodedDirName: string): boolean {
+  private isContainedProject(dirPath: string, encodedDirName: string): boolean {
     if (!this.workspacePath || !this.resolvedWorkspace) return false
     // Quick prefix check to avoid reading files from obviously unrelated dirs
     // (case-folded on Windows — encodings from different tools disagree on case)
     if (!foldPathCase(encodedDirName).startsWith(foldPathCase(this.workspacePath) + '-')) return false
 
-    const cached = this.containedProjectCache.get(encodedDirName)
+    // Keyed by full path, not by encoded name: the same name can exist under
+    // more than one config root and each copy needs its own verdict.
+    const cached = this.containedProjectCache.get(dirPath)
     if (cached !== undefined) return cached
 
-    const result = this.readCwdFromProjectDir(encodedDirName)
+    const result = this.readCwdFromProjectDir(dirPath)
     // Only cache positive results — a dir with no JSONL files yet (race on
     // creation) should be re-checked on the next scan once files appear.
-    if (result) this.containedProjectCache.set(encodedDirName, true)
+    if (result) this.containedProjectCache.set(dirPath, true)
     return result
   }
 
   /** Read JSONL files in a project dir to find the cwd and check containment. */
-  private readCwdFromProjectDir(encodedDirName: string): boolean {
+  private readCwdFromProjectDir(dirPath: string): boolean {
     if (!this.resolvedWorkspace) return false
     const workspaceFolded = foldPathCase(this.resolvedWorkspace)
-    const dirPath = path.join(CLAUDE_DIR, encodedDirName)
     try {
       const files = fs.readdirSync(dirPath)
       for (const file of files) {
@@ -294,38 +300,40 @@ export class SessionWatcher implements AgentSessionWatcher {
   }
 
   private scanForActiveSessions(): void {
-    if (!fs.existsSync(CLAUDE_DIR)) {
-      return
-    }
-
     try {
       const dirsToScan: string[] = []
-      if (this.workspacePath) {
-        // Always include the exact workspace project dir
-        const projectDir = path.join(CLAUDE_DIR, this.workspacePath)
-        if (fs.existsSync(projectDir)) {
-          dirsToScan.push(projectDir)
-        }
+      // Session ids are uuids, so collecting across config roots can't collide —
+      // a workspace open under two accounts simply yields two sets of sessions.
+      for (const root of claudeProjectDirs()) {
+        if (!fs.existsSync(root)) continue
 
-        // Also include subdirectory project dirs (e.g. CLI sessions started
-        // from a subfolder like project/extension/src). Uses containment check
-        // to avoid matching unrelated projects with a similar path prefix.
-        try {
-          const allDirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })
-          for (const dir of allDirs) {
-            if (!dir.isDirectory()) continue
-            const fullPath = path.join(CLAUDE_DIR, dir.name)
-            if (fullPath === projectDir) continue // already added
-            if (this.isContainedProject(dir.name)) {
-              dirsToScan.push(fullPath)
-            }
+        if (this.workspacePath) {
+          // Always include the exact workspace project dir
+          const projectDir = path.join(root, this.workspacePath)
+          if (fs.existsSync(projectDir)) {
+            dirsToScan.push(projectDir)
           }
-        } catch { /* readdir may fail if CLAUDE_DIR is being modified */ }
-      } else {
-        const projectDirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })
-        for (const dir of projectDirs) {
-          if (dir.isDirectory()) {
-            dirsToScan.push(path.join(CLAUDE_DIR, dir.name))
+
+          // Also include subdirectory project dirs (e.g. CLI sessions started
+          // from a subfolder like project/extension/src). Uses containment check
+          // to avoid matching unrelated projects with a similar path prefix.
+          try {
+            const allDirs = fs.readdirSync(root, { withFileTypes: true })
+            for (const dir of allDirs) {
+              if (!dir.isDirectory()) continue
+              const fullPath = path.join(root, dir.name)
+              if (fullPath === projectDir) continue // already added
+              if (this.isContainedProject(fullPath, dir.name)) {
+                dirsToScan.push(fullPath)
+              }
+            }
+          } catch { /* readdir may fail if the root is being modified */ }
+        } else {
+          const projectDirs = fs.readdirSync(root, { withFileTypes: true })
+          for (const dir of projectDirs) {
+            if (dir.isDirectory()) {
+              dirsToScan.push(path.join(root, dir.name))
+            }
           }
         }
       }
@@ -590,8 +598,8 @@ export class SessionWatcher implements AgentSessionWatcher {
   }
 
   dispose(): void {
-    this.dirWatcher?.close()
-    this.dirWatcher = null
+    for (const w of this.rootWatchers) w.close()
+    this.rootWatchers = []
     for (const w of this.dirWatchers.values()) w.close()
     this.dirWatchers.clear()
     for (const [, session] of this.sessions) {

@@ -18,6 +18,24 @@ const HOOK_URL_PREFIX = 'http://127.0.0.1:';
 const DISCOVERY_DIR = path.join(os.homedir(), '.claude', 'agent-flow');
 const MANIFEST_PATH = path.join(DISCOVERY_DIR, 'workspaces.json');
 
+// Mirrors claudeConfigDirs() in extension/src/claude-home.ts. Duplicated because
+// vscode:uninstall runs this as plain CommonJS, outside the bundled extension.
+function claudeSettingsPaths() {
+  const expandTilde = (p) => {
+    if (p === '~') { return os.homedir(); }
+    if (p.startsWith('~/') || p.startsWith('~\\')) { return path.join(os.homedir(), p.slice(2)); }
+    return p;
+  };
+  const dirs = (process.env.CLAUDE_CONFIG_DIR || '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+    .map(entry => path.resolve(expandTilde(entry)));
+  const unique = [...new Set(dirs)];
+  const roots = unique.length > 0 ? unique : [path.join(os.homedir(), '.claude')];
+  return roots.map(dir => path.join(dir, 'settings.json'));
+}
+
 // ─── Remove hooks from a settings file ─────────────────────────────────────
 
 function removeHooksFromFile(settingsPath) {
@@ -91,8 +109,11 @@ function collectWorkspaces() {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-// 1. Global settings
-removeHooksFromFile(path.join(os.homedir(), '.claude', 'settings.json'));
+// 1. Global settings, one per config dir — leaving any behind orphans a hook
+// pointing at a hook.js that step 3 deletes.
+for (const settingsPath of claudeSettingsPaths()) {
+  removeHooksFromFile(settingsPath);
+}
 
 // 2. All known project-level settings
 for (const workspace of collectWorkspaces()) {

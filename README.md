@@ -72,6 +72,23 @@ To restrict to one runtime:
 
 For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
+### Multiple Claude accounts
+
+Claude Code reads `CLAUDE_CONFIG_DIR` to relocate `~/.claude`, which is how you keep separate accounts on one machine:
+
+```bash
+# a personal account alongside the default work one
+CLAUDE_CONFIG_DIR="$HOME/.claude-personal" claude
+```
+
+Agent Flow honours the same variable, and accepts a comma-separated list so you can watch several accounts on one board:
+
+```bash
+CLAUDE_CONFIG_DIR="$HOME/.claude,$HOME/.claude-personal" npx agent-flow-app
+```
+
+Every directory listed gets its transcripts watched and its `settings.json` configured with the Agent Flow hooks. Unset, it behaves exactly as before and uses `~/.claude` alone.
+
 ### JSONL Event Log
 
 You can also point Agent Flow at a JSONL event log file:
