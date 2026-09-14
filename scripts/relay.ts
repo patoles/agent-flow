@@ -15,6 +15,7 @@ import { readNewFileLines, foldPathCase } from '../extension/src/fs-utils'
 import { scanSubagentsDir, readSubagentNewLines } from '../extension/src/subagent-watcher'
 import { handlePermissionDetection } from '../extension/src/permission-detection'
 import { CodexSessionWatcher } from '../extension/src/codex-session-watcher'
+import { claudeProjectDirs, DEFAULT_CLAUDE_DIR } from '../extension/src/claude-home'
 import {
   INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, SYSTEM_PROMPT_BASE_TOKENS, ORCHESTRATOR_NAME,
@@ -24,8 +25,14 @@ import { setLogLevel } from '../extension/src/logger'
 import type { TelemetryClient } from './telemetry'
 
 const MAX_EVENT_BUFFER = 5000
-const DISCOVERY_DIR = path.join(os.homedir(), '.claude', 'agent-flow')
-const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects')
+
+// Agent Flow's own rendezvous directory, deliberately NOT derived from
+// CLAUDE_CONFIG_DIR. The relay writes discovery files here and hook.js reads
+// them back — but hook.js runs as a child of Claude Code and inherits the
+// variable, so an env-derived path would send a hook from a non-default config
+// dir looking somewhere the relay never wrote to, silently dropping its events.
+// Both sides must agree on one env-independent location.
+const DISCOVERY_DIR = path.join(os.homedir(), DEFAULT_CLAUDE_DIR, 'agent-flow')
 
 let relayCreated = false
 let verbose = false
@@ -268,8 +275,6 @@ function readNewLines(sessionId: string) {
 // ─── Session scanner ────────────────────────────────────────────────────────
 
 function scanForActiveSessions(workspace: string) {
-  if (!fs.existsSync(CLAUDE_DIR)) return
-
   let resolved = workspace
   try { resolved = fs.realpathSync(resolved) } catch {}
   const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
@@ -278,18 +283,24 @@ function scanForActiveSessions(workspace: string) {
   // Case-folded on Windows — VS Code/shells report `c:\...` while Claude Code
   // encodes `C--...`, so exact string matching never found the project dir there.
   const encodedFolded = foldPathCase(encoded)
-  try {
-    for (const dir of fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })) {
-      if (!dir.isDirectory()) continue
-      const nameFolded = foldPathCase(dir.name)
-      if (nameFolded === encodedFolded || nameFolded.startsWith(encodedFolded + '-')) {
-        dirsToScan.push(path.join(CLAUDE_DIR, dir.name))
+  // One workspace can have sessions under several config dirs at once (the same
+  // repo opened by a work account and a personal one). Session ids are uuids, so
+  // collecting across roots can't collide.
+  for (const root of claudeProjectDirs()) {
+    if (!fs.existsSync(root)) continue
+    try {
+      for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
+        if (!dir.isDirectory()) continue
+        const nameFolded = foldPathCase(dir.name)
+        if (nameFolded === encodedFolded || nameFolded.startsWith(encodedFolded + '-')) {
+          dirsToScan.push(path.join(root, dir.name))
+        }
       }
+    } catch {
+      // readdir failed — fall back to the exact-match dir if it exists
+      const projectDir = path.join(root, encoded)
+      if (fs.existsSync(projectDir)) dirsToScan.push(projectDir)
     }
-  } catch {
-    // readdir failed — fall back to the exact-match dir if it exists
-    const projectDir = path.join(CLAUDE_DIR, encoded)
-    if (fs.existsSync(projectDir)) dirsToScan.push(projectDir)
   }
 
   for (const dirPath of dirsToScan) {
@@ -393,7 +404,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
 
   let hookServer: HookServer | null = null
   let scanInterval: NodeJS.Timeout | null = null
-  let projectDirWatcher: fs.FSWatcher | null = null
+  const projectDirWatchers: fs.FSWatcher[] = []
 
   if (wantClaude) {
     hookServer = new HookServer()
@@ -413,12 +424,13 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
 
     const resolved = (() => { try { return fs.realpathSync(workspace) } catch { return workspace } })()
     const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
-    const projectDir = path.join(CLAUDE_DIR, encoded)
-    if (fs.existsSync(projectDir)) {
+    for (const root of claudeProjectDirs()) {
+      const projectDir = path.join(root, encoded)
+      if (!fs.existsSync(projectDir)) continue
       try {
-        projectDirWatcher = fs.watch(projectDir, (_eventType, filename) => {
+        projectDirWatchers.push(fs.watch(projectDir, (_eventType, filename) => {
           if (filename?.endsWith('.jsonl')) scanForActiveSessions(workspace)
-        })
+        }))
       } catch {}
     }
   }
@@ -534,7 +546,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         removeDiscoveryFile()
         hookServer?.dispose()
         if (scanInterval) clearInterval(scanInterval)
-        projectDirWatcher?.close()
+        for (const watcher of projectDirWatchers) watcher.close()
         for (const session of sessions.values()) {
           session.fileWatcher?.close()
           if (session.pollTimer) clearInterval(session.pollTimer)
