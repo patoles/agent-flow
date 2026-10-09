@@ -17,9 +17,7 @@ import { createEmptyState, MAX_EVENT_LOG } from './simulation/types'
 import { processEvent, type ProcessEventContext } from './simulation/process-event'
 import { computeNextFrame } from './simulation/animate'
 import { snapVisualState } from './simulation/snap-visual-state'
-
-/** ms between React state updates — canvas uses frameRef for smooth 60fps */
-const UI_THROTTLE_MS = 250
+import { shouldCommitFrame } from './simulation/ui-throttle'
 
 export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
   const { useMockData = true, externalEvents, onExternalEventsConsumed, sessionFilter, sessionFilterRef: externalFilterRef, disable1MContext = false } = options
@@ -49,6 +47,7 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
   const animateRef = useRef<(timestamp: number) => void>(() => {})
   /** Throttle React UI updates to ~4/sec — canvas stays smooth via frameRef */
   const lastUIUpdateRef = useRef(0)
+  const lastUITimeRef = useRef(0)
 
   // ─── d3-force simulation ─────────────────────────────────────────────────
   useEffect(() => {
@@ -280,12 +279,17 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     // Force tick — updates agent positions in frameRef
     if (forceSimRef.current) forceSimRef.current.tick()
 
-    // Throttle React re-renders — UI updates at ~4/sec, canvas stays smooth via frameRef
-    if (newEvents.length > 0) {
-      if (!lastUIUpdateRef.current || timestamp - lastUIUpdateRef.current >= UI_THROTTLE_MS) {
-        setState(frameRef.current)
-        lastUIUpdateRef.current = timestamp
-      }
+    // Throttle React re-renders — UI updates at most ~4/sec, canvas stays smooth via frameRef
+    if (shouldCommitFrame({
+      now: timestamp,
+      lastCommitAt: lastUIUpdateRef.current,
+      processedEvents: newEvents.length > 0,
+      currentTime: result.currentTime,
+      lastCommittedTime: lastUITimeRef.current,
+    })) {
+      setState(frameRef.current)
+      lastUIUpdateRef.current = timestamp
+      lastUITimeRef.current = result.currentTime
     }
 
     animationRef.current = requestAnimationFrame(animateRef.current)

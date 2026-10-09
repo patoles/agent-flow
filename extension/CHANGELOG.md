@@ -13,6 +13,7 @@
 - Fix: per-agent model detection (#91)
   - Subagents get their model from the parent transcript (`resolvedModel` on the launch result), so replayed or branched sessions and subagents whose transcript is never tailed now show a model
   - Placeholder `<synthetic>` model ids (written on API errors and interrupts) no longer replace the real model
+- Fix: in review mode, the elapsed time, scrubber knob and counters stood still while playback ran through a stretch with no events, and only caught up on the next event or on pause (#90)
 
 ## 0.9.1
 
