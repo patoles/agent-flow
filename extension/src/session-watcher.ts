@@ -606,7 +606,7 @@ export class SessionWatcher implements AgentSessionWatcher {
       session.subagentWatchers.clear()
       session.subagentsDirWatcher?.close()
       // Clean up orphaned parser state for this session
-      this.parser.clearSessionState(session.pendingToolCalls.keys())
+      this.parser.clearSessionState(session.pendingToolCalls.keys(), session.sessionId)
     }
     this.sessions.clear()
     if (this.scanInterval) {
