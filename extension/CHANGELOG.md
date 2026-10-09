@@ -7,6 +7,12 @@
   - Only Agent Flow's own command hook and its legacy bare-origin HTTP hook (`http://127.0.0.1:<port>`) are matched now. This also fixes setup being skipped when another tool's loopback hook made it look already installed
   - A `settings.json` that can't be parsed is now left untouched with an error, instead of being replaced by a file that only contains hooks
   - Settings are written via a temp file and rename, so an interrupted write can't truncate them
+- Fix: background subagents were marked done the moment they launched (#92)
+  - Claude Code runs `Agent`/`Task` subagents in the background by default. Their immediate tool_result only confirms the launch, but Agent Flow treated it as the finish, so the node completed at once and then looked busy again on its next tool call, or vanished and silently dropped the rest of its events
+  - Background subagents now complete when their `<task-notification>` arrives, including ones launched before Agent Flow attached. Failed or killed runs are marked in the return summary
+- Fix: per-agent model detection (#91)
+  - Subagents get their model from the parent transcript (`resolvedModel` on the launch result), so replayed or branched sessions and subagents whose transcript is never tailed now show a model
+  - Placeholder `<synthetic>` model ids (written on API errors and interrupts) no longer replace the real model
 
 ## 0.9.1
 
