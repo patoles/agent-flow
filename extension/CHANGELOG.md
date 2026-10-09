@@ -14,6 +14,9 @@
   - Subagents get their model from the parent transcript (`resolvedModel` on the launch result), so replayed or branched sessions and subagents whose transcript is never tailed now show a model
   - Placeholder `<synthetic>` model ids (written on API errors and interrupts) no longer replace the real model
 - Fix: in review mode, the elapsed time, scrubber knob and counters stood still while playback ran through a stretch with no events, and only caught up on the next event or on pause (#90)
+- Fix: session switching and replay races in the web view (#78)
+  - Re-selecting the session already on screen no longer freezes event delivery, and live events no longer skip events that hadn't been replayed yet
+  - Restoring a paused snapshot no longer plays it at 1x under the LIVE badge, and the snapshot cache is cleared on reset
 
 ## 0.9.1
 
