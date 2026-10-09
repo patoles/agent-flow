@@ -2,6 +2,10 @@
 node_modules/**
 src/**
 scripts/**
+# Run by VS Code on uninstall (package.json "vscode:uninstall")
+!scripts/uninstall.js
+test/**
+tsconfig.test.json
 esbuild.js
 tsconfig.json
 **/*.ts
