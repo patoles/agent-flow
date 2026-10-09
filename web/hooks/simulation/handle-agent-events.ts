@@ -5,6 +5,7 @@ import {
 } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { AGENT_SPAWN_DISTANCE } from '@/lib/canvas-constants'
+import { withTimelineModel } from '@/lib/timeline-models'
 import { pushTimelineBlock, type ProcessEventContext, type MutableEventState } from './process-event'
 import { edgeId, asString, asBoolean } from './types'
 
@@ -32,6 +33,7 @@ export function handleAgentSpawn(
       ...(model ? { model, tokensMax: ctx.getContextWindowSize(model) } : {}),
       ...(runtime ? { runtime } : {}),
     })
+    if (model) recordTimelineModel(state, name, model)
     return
   }
 
@@ -94,15 +96,20 @@ export function handleAgentSpawn(
     state.edges.push({ id: edgeId(parentId, name), from: parentId, to: name, type: 'parent-child', opacity: 0 })
   }
 
+  // Keep models recorded by an earlier entry for this name (the agent itself
+  // may have been cleaned up after fading out)
+  const previousModels = state.timelineEntries.get(name)?.models
   const timelineEntry: TimelineEntry = {
     id: `timeline-${name}`,
     agentId: name,
     agentName: name,
     startTime: currentTime,
     blocks: [],
+    ...(previousModels ? { models: previousModels } : {}),
   }
   pushTimelineBlock(timelineEntry, currentTime, { type: 'idle', label: 'Starting', color: COLORS.idle }, ctx)
   state.timelineEntries.set(name, timelineEntry)
+  if (model) recordTimelineModel(state, name, model)
 
   state.conversations.set(name, [])
 
@@ -196,4 +203,13 @@ export function handleModelDetected(
       tokensMax: ctx.getContextWindowSize(model),
     })
   }
+  recordTimelineModel(state, agentName, model)
+}
+
+/** Add a model to the agent's timeline entry, which outlives the agent node. */
+function recordTimelineModel(state: MutableEventState, agentName: string, model: string): void {
+  const entry = state.timelineEntries.get(agentName)
+  if (!entry) return
+  const updated = withTimelineModel(entry, model)
+  if (updated !== entry) state.timelineEntries.set(agentName, updated)
 }
