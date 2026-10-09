@@ -14,7 +14,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/patoles/agent-flow"
+    "url": "git+https://github.com/patoles/agent-flow.git"
   },
   "keywords": [
     "agent",
