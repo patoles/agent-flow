@@ -151,67 +151,90 @@ function ensureHookScript() {
 
 // ─── Configure Claude Code hooks ────────────────────────────────────────────
 
+// Legacy Agent Flow HTTP hooks pointed at the bare hook server origin
+// (http://127.0.0.1:<port>). Other tools register loopback HTTP hooks too,
+// usually with a path, so only the bare origin counts as ours.
+// Mirrors extension/src/hook-entries.ts.
+const LEGACY_HOOK_URL_RE = /^http:\/\/127\.0\.0\.1:\d+\/?$/
+
+const HOOK_EVENTS = [
+  'SessionStart', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
+  'SubagentStart', 'SubagentStop', 'Notification', 'Stop', 'SessionEnd',
+]
+
 function isAgentFlowHook(entry) {
-  return entry.hooks?.some(h =>
-    h.command?.includes(HOOK_COMMAND_MARKER) ||
-    h.url?.startsWith('http://127.0.0.1:'),
+  return !!entry?.hooks?.some(h =>
+    h.command?.replace(/\\/g, '/').includes(HOOK_COMMAND_MARKER) ||
+    (typeof h.url === 'string' && LEGACY_HOOK_URL_RE.test(h.url)),
   )
 }
 
-function configureHooks() {
-  const nodePath = resolveNodePath()
-  const hookCommand = `"${nodePath}" "${HOOK_SCRIPT_PATH}"`
+/**
+ * Read a settings file. Missing reads as {}. A file that exists but can't be
+ * parsed returns { error } so we never overwrite the user's settings.
+ */
+function readSettings(settingsPath) {
+  let raw
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf-8')
+  } catch (err) {
+    if (err.code === 'ENOENT') return { settings: {} }
+    return { error: err.message }
+  }
+  if (raw.trim() === '') return { settings: {} }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { error: 'top-level value is not an object' }
+    }
+    return { settings: parsed }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
+function writeJsonAtomic(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  const tmpPath = `${filePath}.${process.pid}.tmp`
+  fs.writeFileSync(tmpPath, JSON.stringify(value, null, 2) + '\n')
+  fs.renameSync(tmpPath, filePath)
+}
+
+/** Returns true if hooks were written, false if the settings file was left alone. */
+function configureHooks(settingsPath = SETTINGS_PATH, hookCommand) {
+  if (!hookCommand) hookCommand = `"${resolveNodePath()}" "${HOOK_SCRIPT_PATH}"`
   const hookEntry = { hooks: [{ type: 'command', command: hookCommand, timeout: HOOK_TIMEOUT_S }] }
 
-  const events = [
-    'SessionStart', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-    'SubagentStart', 'SubagentStop', 'Notification', 'Stop', 'SessionEnd',
-  ]
-
-  let settings = {}
-  try {
-    if (fs.existsSync(SETTINGS_PATH)) {
-      settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'))
-    }
-  } catch {
-    console.log('Could not read existing settings, starting fresh')
+  const { settings, error } = readSettings(settingsPath)
+  if (error) {
+    console.error(`Could not parse ${settingsPath} (${error}).`)
+    console.error('Leaving it untouched. Fix the file and run setup again to enable live events.')
+    return false
   }
 
-  const existingHooks = settings.hooks || {}
-  for (const event of events) {
-    const existing = existingHooks[event] || []
-    const filtered = existing.filter(entry => !isAgentFlowHook(entry))
-    existingHooks[event] = [...filtered, hookEntry]
+  const existingHooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {}
+  for (const event of HOOK_EVENTS) {
+    const existing = Array.isArray(existingHooks[event]) ? existingHooks[event] : []
+    existingHooks[event] = [...existing.filter(entry => !isAgentFlowHook(entry)), hookEntry]
   }
   settings.hooks = existingHooks
 
-  const dir = path.dirname(SETTINGS_PATH)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n')
-  console.log('Configured Claude Code hooks in:', SETTINGS_PATH)
+  writeJsonAtomic(settingsPath, settings)
+  console.log('Configured Claude Code hooks in:', settingsPath)
+  return true
 }
 
 // ─── Detection ──────────────────────────────────────────────────────────────
 
-function isAlreadySetup() {
-  // Check hook script exists
-  if (!fs.existsSync(HOOK_SCRIPT_PATH)) return false
+function isAlreadySetup(settingsPath = SETTINGS_PATH, hookScriptPath = HOOK_SCRIPT_PATH) {
+  if (!fs.existsSync(hookScriptPath)) return false
 
-  // Check hooks are configured in settings.json
-  try {
-    if (!fs.existsSync(SETTINGS_PATH)) return false
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'))
-    const hooks = settings.hooks
-    if (!hooks || typeof hooks !== 'object') return false
-    return Object.values(hooks).some(entries => {
-      if (!Array.isArray(entries)) return false
-      return entries.some(entry => isAgentFlowHook(entry))
-    })
-  } catch {
-    return false
-  }
+  const { settings } = readSettings(settingsPath)
+  const hooks = settings?.hooks
+  if (!hooks || typeof hooks !== 'object') return false
+  return Object.values(hooks).some(entries =>
+    Array.isArray(entries) && entries.some(entry => isAgentFlowHook(entry)),
+  )
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -225,7 +248,7 @@ function ensureSetup() {
   console.log('')
 }
 
-module.exports = { ensureSetup }
+module.exports = { ensureSetup, isAgentFlowHook, configureHooks, isAlreadySetup }
 
 // Run directly: node scripts/setup.js [--force]
 if (require.main === module) {
@@ -238,6 +261,6 @@ if (require.main === module) {
 
   console.log('Setting up Agent Flow...\n')
   ensureHookScript()
-  configureHooks()
+  if (!configureHooks()) process.exit(1)
   console.log('\nDone! New sessions will stream events to Agent Flow.')
 }

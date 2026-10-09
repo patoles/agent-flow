@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2
+
+- Fix: hook setup no longer removes other tools' hooks from `~/.claude/settings.json` (#73)
+  - Setup (`npx agent-flow-app`, `pnpm run setup`, and the VS Code extension) treated any hook URL starting with `http://127.0.0.1:` as its own, so loopback HTTP hooks registered by other tools were deleted on install. On every activation, the VS Code extension also rewrote them into Agent Flow command hooks
+  - Only Agent Flow's own command hook and its legacy bare-origin HTTP hook (`http://127.0.0.1:<port>`) are matched now. This also fixes setup being skipped when another tool's loopback hook made it look already installed
+  - A `settings.json` that can't be parsed is now left untouched with an error, instead of being replaced by a file that only contains hooks
+  - Settings are written via a temp file and rename, so an interrupted write can't truncate them
+
 ## 0.9.1
 
 - Fix: Claude Code session discovery on Windows — workspace-to-project-dir matching is now case-insensitive on win32 (#57, part of #4)
