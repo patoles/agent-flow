@@ -94,7 +94,15 @@ export function AgentVisualizer() {
   const sessionCacheRef = useRef<Map<string, { snapshot: ReturnType<typeof saveSnapshot>; eventCount: number }>>(new Map())
   const prevSelectedRef = useRef<string | null>(null)
   useLayoutEffect(() => {
+    if (bridge.selectedSessionId === null && prevSelectedRef.current !== null) {
+      // Bridge reset (panel reopened / relay restarted): cached snapshots are stale
+      sessionCacheRef.current.clear()
+      prevSelectedRef.current = null
+      return
+    }
     if (bridge.selectedSessionId && bridge.selectedSessionId !== prevSelectedRef.current) {
+      // Review/scrub state is per-component, not per-session: the incoming tab is restored live
+      setIsReviewing(false)
       // Save outgoing session state (if any)
       if (prevSelectedRef.current !== null) {
         sessionCacheRef.current.set(prevSelectedRef.current, {

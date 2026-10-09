@@ -124,6 +124,13 @@ export function useVSCodeBridge(): BridgeHookResult {
         const buf = sessionEventsRef.current.get(event.sessionId) || []
         buf.push(simEvent)
         sessionEventsRef.current.set(event.sessionId, buf)
+        // Keep lastActivityTime roughly current (throttled: one state update per 5s per session)
+        const now = Date.now()
+        setSessions(prev => {
+          const s = prev.find(x => x.id === event.sessionId)
+          if (!s || now - s.lastActivityTime < 5000) return prev
+          return prev.map(x => x.id === event.sessionId ? { ...x, lastActivityTime: now } : x)
+        })
       }
 
       // Deliver to pending if session matches (ref is always current).
@@ -202,6 +209,11 @@ export function useVSCodeBridge(): BridgeHookResult {
         }
       } else if (type === 'started') {
         const session = data as SessionInfo
+        // Resume after inactivity re-sends 'started' for a session we may already
+        // be showing. Re-arming the switch for the same id would set
+        // sessionSwitchPendingRef without anything ever clearing it (the layout
+        // effect only runs when the selection changes), freezing event delivery.
+        const alreadySelected = session.id === selectedSessionIdRef.current
         setSessions(prev => {
           const existing = prev.find(s => s.id === session.id)
           if (existing) {
@@ -212,6 +224,7 @@ export function useVSCodeBridge(): BridgeHookResult {
           }
           return [...prev, session]
         })
+        if (alreadySelected) return
         // Auto-select newly started session.
         // Set switch-pending flag to prevent the animation frame from processing
         // events in the wrong simulation state before useLayoutEffect swaps it.
