@@ -6,7 +6,7 @@ Real-time visualization of Claude Code and Codex agent orchestration. Watch your
 
 ## Why Agent Flow?
 
-I built Agent Flow while developing [CraftMyGame](https://craftmygame.com), a game creation platform driven by AI agents. Debugging agent behavior was painful, so we made it visual. Now we're sharing it.
+I built Agent Flow while developing [Antics](https://antics.gg), a game creation platform driven by AI agents. Debugging agent behavior was painful, so we made it visual. Now we're sharing it.
 
 Claude Code is powerful, but its execution is a black box — you see the final result, not the journey. Agent Flow makes the invisible visible:
 
@@ -139,7 +139,7 @@ Other scripts:
 
 ## Author
 
-Created by [Simon Patole](https://github.com/patoles), for [CraftMyGame](https://craftmygame.com).
+Created by [Simon Patole](https://github.com/patoles), for [Antics](https://antics.gg).
 
 ## Privacy & Telemetry
 
