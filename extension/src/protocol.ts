@@ -162,6 +162,9 @@ export interface SubagentState {
   permissionTimer: NodeJS.Timeout | null
   permissionEmitted: boolean
   spawnEmitted: boolean
+  /** Node has been completed (Workflow subagents complete when their Workflow
+   *  tool_result arrives). Cleared if the transcript starts growing again. */
+  completed: boolean
 }
 
 /** State tracked for a single watched Claude Code session */
