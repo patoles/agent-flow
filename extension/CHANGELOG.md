@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3
+
+- The Timeline panel now shows the model(s) each agent used under its name, and the full agent name and models on hover (#91)
+  - Models are recorded in first-seen order on the agent's timeline row, so the record survives after a subagent finishes and fades out, and after seeking. An agent that switched models (e.g. with `/model`) shows each one
+- Fix: subagents spawned by the Workflow tool now appear (#57, #56)
+  - Newer Claude Code writes their transcripts under `subagents/workflows/wf_<id>/`, which the flat subagent scan never looked in. Discovery is now recursive, writes there keep the session alive, and Workflow subagent nodes complete when the Workflow finishes
+
 ## 0.9.2
 
 - Fix: hook setup no longer removes other tools' hooks from `~/.claude/settings.json` (#73)

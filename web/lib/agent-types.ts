@@ -108,6 +108,9 @@ export interface TimelineEntry {
   startTime: number
   endTime?: number
   blocks: TimelineBlock[]
+  /** Every model this agent reported, in first-seen order. Unlike the agent
+   *  itself, the timeline entry survives fade-out cleanup and seeking. */
+  models?: string[]
 }
 
 export interface TimelineBlock {
