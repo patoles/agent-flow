@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { Agent, Particle, Edge, Discovery, DepthParticle } from '@/lib/agent-types'
 import type { SimulationState } from '@/hooks/simulation/types'
-import { getStateColor } from '@/lib/colors'
+import { getStateColor, COLORS } from '@/lib/colors'
 import { ANIM_SPEED, PERF_OVERLAY, PERF_OVERLAY_ENABLED } from '@/lib/canvas-constants'
 import { BloomRenderer } from './bloom-renderer'
 import { createDepthParticles, updateDepthParticles, drawBackground } from './background-layer'
@@ -41,12 +41,15 @@ interface CanvasProps {
   onDiscoveryClick?: (discoveryId: string | null) => void
   selectedDiscoveryId?: string | null
   showCostOverlay?: boolean
+  /** Full-canvas caption (e.g. '… 3m later …' during an export); drawn into the canvas so captureStream sees it */
+  overlayText?: string | null
 }
 
 export function AgentCanvas({
   simulationRef,
   selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, showCostOverlay,
+  overlayText,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -93,7 +96,7 @@ export function AgentCanvas({
     agents: sim.agents, toolCalls: sim.toolCalls,
     particles: sim.particles, edges: sim.edges, discoveries: sim.discoveries,
     selectedAgentId, hoveredAgentId, showStats, showHexGrid,
-    showCostOverlay, selectedToolCallId, selectedDiscoveryId,
+    showCostOverlay, selectedToolCallId, selectedDiscoveryId, overlayText,
     simTime: sim.currentTime, pauseAutoFit, dimensions,
     onAgentDrag, onAgentClick, onAgentHover, onContextMenu,
     onToolCallClick, onDiscoveryClick,
@@ -320,6 +323,22 @@ export function AgentCanvas({
         ctx.restore()
       }
 
+      // Export caption: idle gap card
+      const caption = drawPropsRef.current.overlayText
+      if (caption) {
+        ctx.save()
+        ctx.fillStyle = 'rgba(2, 6, 14, 0.82)'
+        ctx.fillRect(0, 0, w, h)
+        ctx.fillStyle = COLORS.holoBright
+        ctx.font = '500 28px ui-monospace, SFMono-Regular, Menlo, monospace'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.shadowColor = COLORS.holoBright
+        ctx.shadowBlur = 18
+        ctx.fillText(caption, w / 2, h / 2)
+        ctx.restore()
+      }
+
     } catch (err) {
       // Log at most once every 5s to avoid flooding the console
       const now = Date.now()
@@ -343,6 +362,7 @@ export function AgentCanvas({
     <div ref={containerRef} className="relative w-full h-full overflow-hidden" style={{ cursor: isDragging ? 'grabbing' : 'grab' }}>
       <canvas
         ref={mainCanvasRef}
+        data-agent-canvas
         style={{ width: dimensions.width, height: dimensions.height }}
         {...handlers}
         className="w-full h-full"
