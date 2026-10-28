@@ -52,6 +52,7 @@ interface WatchedCodexSession {
   sessionDetected: boolean
   sessionCompleted: boolean
   label: string
+  cwd?: string
   rolloutState: CodexRolloutState
   parser: CodexRolloutParser
 }
@@ -167,6 +168,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     return Array.from(this.sessions.values()).map(s => ({
       id: s.sessionId,
       label: s.label,
+      cwd: s.cwd,
       status: s.sessionCompleted ? 'completed' : 'active',
       startTime: s.sessionStartTime,
       lastActivityTime: s.lastActivityTime,
@@ -177,7 +179,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     for (const [id, session] of this.sessions) {
       if (!session.sessionDetected) continue
       if (sessionIds && !sessionIds.includes(id)) continue
-      this._onSessionLifecycle.fire({ type: 'started', sessionId: id, label: session.label })
+      this._onSessionLifecycle.fire({ type: 'started', sessionId: id, label: session.label, cwd: session.cwd })
     }
   }
 
@@ -232,9 +234,9 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
         const ageS = (Date.now() - stat.mtimeMs) / 1000
         if (ageS > ACTIVE_SESSION_AGE_S) continue
 
+        const cwd = readSessionCwd(filePath)
         // Workspace filter — only attach if cwd matches (or no workspace set)
         if (this.workspacePath) {
-          const cwd = readSessionCwd(filePath)
           if (cwd === null) continue
           const resolvedCwd = this.resolvePath(cwd)
           if (!resolvedCwd || !this.pathMatchesWorkspace(resolvedCwd)) {
@@ -243,7 +245,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
           }
         }
 
-        this.attachSession(filePath, stat)
+        this.attachSession(filePath, stat, cwd ?? undefined)
       }
     }
 
@@ -280,7 +282,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
     return candidate.startsWith(workspace + path.sep)
   }
 
-  private attachSession(filePath: string, stat: fs.Stats): void {
+  private attachSession(filePath: string, stat: fs.Stats, cwd?: string): void {
     const sessionId = this.sessionIdFor(filePath)
     const label = `Codex ${sessionId.slice(0, SESSION_ID_DISPLAY)}`
 
@@ -296,7 +298,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
         const s = this.sessions.get(sessionId)
         if (!s || !s.label.startsWith('Codex ')) return // only replace auto-label
         s.label = newLabel
-        this._onSessionLifecycle.fire({ type: 'updated', sessionId, label: newLabel })
+        this._onSessionLifecycle.fire({ type: 'updated', sessionId, label: newLabel, cwd: s.cwd })
       },
     })
 
@@ -313,6 +315,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
       sessionDetected: false,
       sessionCompleted: false,
       label,
+      cwd,
       rolloutState: createCodexRolloutState(),
       parser,
     }
@@ -323,7 +326,7 @@ export class CodexSessionWatcher implements AgentSessionWatcher {
 
     session.sessionDetected = true
     this._onSessionDetected.fire(sessionId)
-    this._onSessionLifecycle.fire({ type: 'started', sessionId, label })
+    this._onSessionLifecycle.fire({ type: 'started', sessionId, label, cwd })
 
     try {
       session.fileWatcher = fs.watch(filePath, () => this.readNewLines(sessionId))
