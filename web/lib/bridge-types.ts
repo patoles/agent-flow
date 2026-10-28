@@ -21,4 +21,13 @@ export interface SessionInfo {
   lastActivityTime: number
 }
 
+/** A same-file collision between agents (same or different sessions), as reported by the backend */
+export interface FileCollision {
+  file: string
+  parties: Array<{ sessionId: string; agent: string; action: 'read' | 'write'; wall: number }>
+  sessions: string[]
+  /** browser receipt time, for expiry */
+  seenAt: number
+}
+
 export type ConnectionStatus = 'connected' | 'disconnected' | 'watching'
