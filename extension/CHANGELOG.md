@@ -2,6 +2,9 @@
 
 ## 0.9.3
 
+- Security: Agent Flow's local servers now reject requests from web pages (#102)
+  - The standalone app and the dev relay only answer requests addressed to a loopback name (`127.0.0.1`, `localhost` or `[::1]`). Before, a malicious page could use DNS rebinding to read the event stream, which includes commands, file paths and tool output
+  - The hook server applies the same check and also rejects any request that carries an `Origin` header, so a page can no longer POST fake agent events to it. hook.js and Claude Code never send one, so existing hook setups keep working
 - The Timeline panel now shows the model(s) each agent used under its name, and the full agent name and models on hover (#91)
   - Models are recorded in first-seen order on the agent's timeline row, so the record survives after a subagent finishes and fades out, and after seeking. An agent that switched models (e.g. with `/model`) shows each one
 - Fix: subagents spawned by the Workflow tool now appear (#57, #56)

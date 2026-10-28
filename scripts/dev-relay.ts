@@ -6,6 +6,7 @@
 import * as http from 'http'
 import { createRelay } from './relay'
 import { DEFAULT_RELAY_PORT, DEV_WEB_ORIGIN_PATTERN } from '../extension/src/constants'
+import { isLoopbackHost } from '../extension/src/request-guard'
 
 async function main() {
   const workspace = process.argv[2] || process.cwd()
@@ -16,6 +17,13 @@ async function main() {
   const relay = await createRelay({ workspace, verbose: true })
 
   const server = http.createServer((req, res) => {
+    // Reject DNS-rebinding requests, which reach 127.0.0.1 under a foreign Host.
+    if (!isLoopbackHost(req.headers.host)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' })
+      res.end('Forbidden')
+      return
+    }
+
     // Echo back the request Origin if it matches a localhost pattern, so
     // CORS survives Next.js picking a fallback port when 3000 is busy.
     const origin = req.headers.origin
