@@ -13,6 +13,7 @@ import { AgentEvent, SessionInfo, WatchedSession } from '../extension/src/protoc
 import { TranscriptParser } from '../extension/src/transcript-parser'
 import { readNewFileLines, foldPathCase } from '../extension/src/fs-utils'
 import { scanSubagentsDir, readSubagentNewLines, newestSubagentMtime } from '../extension/src/subagent-watcher'
+import { followSession } from '../extension/src/session-relocation'
 import { handlePermissionDetection } from '../extension/src/permission-detection'
 import { CodexSessionWatcher } from '../extension/src/codex-session-watcher'
 import {
@@ -231,11 +232,18 @@ function watchSession(sessionId: string, filePath: string) {
   emitContextUpdate(ORCHESTRATOR_NAME, session, sessionId)
   parser.emitCatchUpEntries(catchUpEntries, session, sessionId)
 
-  session.fileWatcher = fs.watch(filePath, (eventType) => {
+  const watchTranscript = () => fs.watch(session.filePath, (eventType) => {
     if (eventType === 'change') readNewLines(sessionId)
   })
+  session.fileWatcher = watchTranscript()
 
   session.pollTimer = setInterval(() => {
+    // Entering a worktree moves the transcript to another project folder
+    if (followSession(watcherDelegate, parser, session, CLAUDE_DIR)) {
+      log(`[session] ${sessionId.slice(0, SESSION_ID_DISPLAY)} moved to ${session.filePath}`)
+      session.fileWatcher?.close()
+      try { session.fileWatcher = watchTranscript() } catch {}
+    }
     readNewLines(sessionId)
     for (const [subPath] of session.subagentWatchers) {
       readSubagentNewLines(watcherDelegate, parser, subPath, sessionId)

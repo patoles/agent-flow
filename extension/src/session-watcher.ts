@@ -10,6 +10,7 @@ import {
 import type { AgentSessionWatcher, SessionLifecycleEvent } from './session-runtime'
 import { TranscriptParser } from './transcript-parser'
 import { readNewFileLines, foldPathCase } from './fs-utils'
+import { followSession } from './session-relocation'
 import { handlePermissionDetection } from './permission-detection'
 import { scanSubagentsDir, readSubagentNewLines, newestSubagentMtime } from './subagent-watcher'
 import { createLogger } from './logger'
@@ -449,15 +450,22 @@ export class SessionWatcher implements AgentSessionWatcher {
     this.parser.emitCatchUpEntries(catchUpEntries, session, sessionId)
 
     // Watch for new content
-    session.fileWatcher = fs.watch(filePath, (eventType) => {
+    const watchTranscript = () => fs.watch(session.filePath, (eventType) => {
       if (eventType === 'change') {
         this.readNewLines(sessionId)
       }
     })
+    session.fileWatcher = watchTranscript()
 
     // Poll fallback — fs.watch on macOS can silently stop firing events
     // for long-lived watchers. This ensures we still detect new content.
     session.pollTimer = setInterval(() => {
+      // Entering a worktree moves the transcript to another project folder
+      if (followSession(this.selfDelegate, this.parser, session, CLAUDE_DIR)) {
+        log.info(`Session ${sessionId.slice(0, SESSION_ID_DISPLAY)} moved to ${session.filePath}`)
+        session.fileWatcher?.close()
+        try { session.fileWatcher = watchTranscript() } catch (err) { log.debug('Transcript watch failed:', err) }
+      }
       this.readNewLines(sessionId)
       // Also poll subagent files — fs.watch may not fire after extension restart
       for (const [subPath] of session.subagentWatchers) {
