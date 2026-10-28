@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3
+
+- Security: Agent Flow's local servers now reject requests from web pages (#102)
+  - The standalone app and the dev relay only answer requests addressed to a loopback name (`127.0.0.1`, `localhost` or `[::1]`). Before, a malicious page could use DNS rebinding to read the event stream, which includes commands, file paths and tool output
+  - The hook server applies the same check and also rejects any request that carries an `Origin` header, so a page can no longer POST fake agent events to it. hook.js and Claude Code never send one, so existing hook setups keep working
+
 ## 0.9.2
 
 - Fix: hook setup no longer removes other tools' hooks from `~/.claude/settings.json` (#73)

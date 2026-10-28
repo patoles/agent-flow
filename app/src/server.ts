@@ -10,6 +10,7 @@ import { exec, execFile } from 'child_process'
 import { createRelay } from '../../scripts/relay'
 import { createTelemetryClient } from '../../scripts/telemetry'
 import { serveStatic } from './static'
+import { isLoopbackHost } from '../../extension/src/request-guard'
 
 interface ServerOptions {
   port: number
@@ -31,6 +32,13 @@ export async function startServer(options: ServerOptions) {
   const relay = await createRelay({ workspace, verbose: options.verbose, telemetry })
 
   const server = http.createServer((req, res) => {
+    // Reject DNS-rebinding requests, which reach 127.0.0.1 under a foreign Host.
+    if (!isLoopbackHost(req.headers.host)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' })
+      res.end('Forbidden')
+      return
+    }
+
     // SSE endpoint
     if (req.url === '/events') {
       return relay.handleSSE(req, res)

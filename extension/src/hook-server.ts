@@ -10,6 +10,7 @@ import {
 import { summarizeInput, summarizeResult, extractFilePath, buildDiscovery } from './tool-summarizer'
 import { estimateTokenCost } from './token-estimator'
 import { createLogger } from './logger'
+import { isAllowedHookRequest } from './request-guard'
 
 const log = createLogger('HookServer')
 
@@ -66,6 +67,12 @@ export class HookServer implements vscode.Disposable {
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
+        if (!isAllowedHookRequest(req.headers)) {
+          log.warn(`Rejected hook request (host: ${req.headers.host ?? '-'}, origin: ${req.headers.origin ?? '-'})`)
+          res.writeHead(403)
+          res.end()
+          return
+        }
         if (req.method === 'POST') {
           let body = ''
           let oversized = false
