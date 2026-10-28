@@ -95,7 +95,9 @@ export interface TopBarProps {
   showCostOverlay: boolean
   showTimeline: boolean
   isMuted: boolean
-  onTogglePanel: (panel: 'files' | 'transcript' | 'cost') => void
+  onTogglePanel: (panel: 'files' | 'transcript' | 'cost' | 'dead') => void
+  showDeadLetters: boolean
+  deadLetterCount: number
   onToggleTimeline: () => void
   onToggleMute: () => void
 }
@@ -106,6 +108,7 @@ export const TopBar = memo(function TopBar({
   isVSCode, connectionStatus,
   agentCount, totalTokens,
   showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
+  showDeadLetters, deadLetterCount,
   onTogglePanel, onToggleTimeline, onToggleMute,
 }: TopBarProps) {
   return (
@@ -144,6 +147,14 @@ export const TopBar = memo(function TopBar({
         }}>
           <ToggleButton active={showFileAttention} onClick={() => onTogglePanel('files')} style={{ background: showFileAttention ? undefined : 'transparent', border: 'none' }}>Files</ToggleButton>
           <ToggleButton active={showTranscript} onClick={() => onTogglePanel('transcript')} style={{ background: showTranscript ? undefined : 'transparent', border: 'none' }}>Chat</ToggleButton>
+          <ToggleButton
+            active={showDeadLetters}
+            onClick={() => onTogglePanel('dead')}
+            activeColor={{ bg: 'rgba(255, 85, 102, 0.18)', text: COLORS.error }}
+            style={{ background: showDeadLetters ? undefined : 'transparent', border: 'none', color: deadLetterCount > 0 && !showDeadLetters ? COLORS.error : undefined }}
+          >
+            ✕ {deadLetterCount}
+          </ToggleButton>
           <ToggleButton
             active={showCostOverlay}
             onClick={() => onTogglePanel('cost')}
