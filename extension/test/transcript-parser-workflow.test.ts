@@ -55,6 +55,7 @@ function makeSession(): WatchedSession {
     label: 'test session',
     labelSet: false,
     model: null,
+    modelDetectedAgents: new Map(),
     permissionTimer: null,
     permissionEmitted: false,
     contextBreakdown: { systemPrompt: 0, userMessages: 0, toolResults: 0, reasoning: 0, subagentResults: 0 },

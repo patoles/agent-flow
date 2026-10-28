@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.4
+
+- Fix: sessions that enter a git worktree mid-session no longer freeze (#69)
+  - When a session runs `EnterWorktree`, Claude Code moves its transcript and subagent folder into the worktree's project folder. Agent Flow kept reading the old path, so nothing after the move appeared, including the session's subagents. It now follows the session to its new folder and picks up where it left off
+  - Subagents that older Claude Code versions wrote under the worktree's project folder, while the session's transcript stayed put, are now found too
+
 ## 0.9.3
 
 - Security: Agent Flow's local servers now reject requests from web pages (#102)

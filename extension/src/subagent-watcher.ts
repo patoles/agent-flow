@@ -140,6 +140,58 @@ export function scanSubagentsDir(
   } catch (err) { log.debug('Subagent dir scan failed:', err) }
 }
 
+/**
+ * Watch agent transcripts in subagent folders other than `session.subagentsDir`.
+ * Older Claude Code versions kept a session's transcript in place after it
+ * entered a worktree but wrote its subagents under the worktree's project folder.
+ */
+export function scanExtraSubagentDirs(
+  delegate: SubagentWatcherDelegate,
+  parser: TranscriptParser,
+  sessionId: string,
+  dirs: readonly string[],
+): void {
+  const session = delegate.getSession(sessionId)
+  if (!session) return
+  for (const dir of dirs) {
+    for (const filePath of collectSubagentJsonlFiles(dir)) {
+      if (session.subagentWatchers.has(filePath)) continue
+      startWatchingSubagentFile(delegate, parser, filePath, sessionId)
+    }
+  }
+}
+
+/**
+ * Re-key subagent watchers after their folder moved from `fromDir` to `toDir`,
+ * keeping each one's read offset so nothing is skipped or replayed.
+ */
+export function moveSubagentWatchers(
+  delegate: SubagentWatcherDelegate,
+  parser: TranscriptParser,
+  sessionId: string,
+  fromDir: string,
+  toDir: string,
+): void {
+  const session = delegate.getSession(sessionId)
+  if (!session) return
+  for (const [oldPath, state] of [...session.subagentWatchers]) {
+    const rel = path.relative(fromDir, oldPath)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue
+    const newPath = path.join(toDir, rel)
+    state.watcher?.close()
+    state.watcher = null
+    session.subagentWatchers.delete(oldPath)
+    // Already picked up at its new path by a scan that ran mid-move
+    if (session.subagentWatchers.has(newPath)) continue
+    session.subagentWatchers.set(newPath, state)
+    try {
+      state.watcher = fs.watch(newPath, () => {
+        readSubagentNewLines(delegate, parser, newPath, sessionId)
+      })
+    } catch (err) { log.debug('Subagent file watch failed:', err) }
+  }
+}
+
 function startWatchingSubagentFile(
   delegate: SubagentWatcherDelegate,
   parser: TranscriptParser,
