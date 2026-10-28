@@ -1,4 +1,4 @@
-import { CLAUDE_FAMILY_ALTERNATION } from './canvas-constants'
+import { CLAUDE_FAMILIES, CLAUDE_FAMILY_ALTERNATION } from './canvas-constants'
 
 /** Convert a 0–1 alpha value to a two-character hex string (e.g. 0.5 → '80') */
 export function alphaHex(alpha: number): string {
@@ -45,4 +45,12 @@ export function formatModelName(model: string): string {
   if (gpt) return `GPT-${gpt[1]}`
 
   return base
+}
+
+/** Node color for a model family (null for unknown/absent models — caller falls back to the state color). */
+export function getModelColor(model?: string): string | null {
+  if (!model) return null
+  const m = model.toLowerCase()
+  const fam = CLAUDE_FAMILIES.find(f => m.includes(f.name))
+  return fam ? fam.color : null
 }
