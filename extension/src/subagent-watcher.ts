@@ -208,6 +208,7 @@ function startWatchingSubagentFile(
   const state: SubagentState = {
     watcher: null,
     fileSize: 0,
+    fileTail: '',
     agentName,
     pendingToolCalls: new Map(),
     seenToolUseIds: new Set(),
@@ -274,9 +275,10 @@ export function readSubagentNewLines(
   const state = session.subagentWatchers.get(filePath)
   if (!state) return
 
-  const result = readNewFileLines(filePath, state.fileSize)
+  const result = readNewFileLines(filePath, state.fileSize, state.fileTail)
   if (!result) return
   state.fileSize = result.newSize
+  state.fileTail = result.tail
 
   // If inline progress events are handling this subagent, skip event emission
   // from the file watcher to avoid duplicates. We still advance fileSize above
