@@ -7,6 +7,7 @@
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test'
+import { once } from 'node:events'
 import assert from 'node:assert/strict'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -27,6 +28,7 @@ function makeSession(filePath: string): WatchedSession {
     fileWatcher: null,
     pollTimer: null,
     fileSize: 0,
+    fileTail: '',
     sessionStartTime: Date.now(),
     pendingToolCalls: new Map(),
     seenToolUseIds: new Set(),
@@ -132,12 +134,33 @@ describe('findSubagentsDirs', () => {
 })
 
 describe('followSession', () => {
-  it('re-points a session whose transcript moved into a worktree folder, keeping offsets', () => {
-    write(`${REPO}/${SESSION_ID}.jsonl`, '{"type":"user"}\n')
+  it('re-points a session whose transcript moved into a worktree folder, keeping offsets', async () => {
+    write(`${REPO}/${SESSION_ID}.jsonl`, '{"type":"user"}\npartial-main')
+    session.fileSize = fs.statSync(session.filePath).size
+    session.fileTail = 'partial-main'
     const oldSub = write(`${REPO}/${SESSION_ID}/subagents/agent-a1.jsonl`, toolUse('t1'))
     scanSubagentsDir(delegate, parser, SESSION_ID)
     const offset = session.subagentWatchers.get(oldSub)!.fileSize
     assert.ok(offset > 0)
+
+    // Windows locks watched paths. Close the subagent file watcher before
+    // simulating EnterWorktree; moveSubagentWatchers reattaches it afterwards.
+    const watcher = session.subagentWatchers.get(oldSub)!.watcher
+    if (watcher) {
+      const closed = once(watcher, 'close')
+      watcher.close()
+      await closed
+    }
+    session.subagentWatchers.get(oldSub)!.watcher = null
+
+    // The recursive directory watcher also holds a handle under the session
+    // folder on Windows, so wait for it to close before simulating the move.
+    if (session.subagentsDirWatcher) {
+      const closed = once(session.subagentsDirWatcher, 'close')
+      session.subagentsDirWatcher.close()
+      await closed
+      session.subagentsDirWatcher = null
+    }
 
     // What EnterWorktree does: move the transcript and the session folder
     fs.mkdirSync(path.join(root, WORKTREE))
@@ -147,6 +170,7 @@ describe('followSession', () => {
     assert.equal(followSession(delegate, parser, session, root), true)
     const newSub = path.join(root, WORKTREE, SESSION_ID, 'subagents', 'agent-a1.jsonl')
     assert.equal(session.filePath, path.join(root, WORKTREE, `${SESSION_ID}.jsonl`))
+    assert.equal(session.fileTail, 'partial-main')
     assert.equal(session.subagentsDir, path.join(root, WORKTREE, SESSION_ID, 'subagents'))
     assert.deepEqual([...session.subagentWatchers.keys()], [newSub])
     assert.equal(session.subagentWatchers.get(newSub)!.fileSize, offset)

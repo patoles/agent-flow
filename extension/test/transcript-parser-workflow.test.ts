@@ -21,6 +21,7 @@ function makeSubagentState(agentName: string, overrides: Partial<SubagentState> 
   return {
     watcher: null,
     fileSize: 0,
+    fileTail: '',
     agentName,
     pendingToolCalls: new Map(),
     seenToolUseIds: new Set(),
@@ -39,6 +40,7 @@ function makeSession(): WatchedSession {
     fileWatcher: null,
     pollTimer: null,
     fileSize: 0,
+    fileTail: '',
     sessionStartTime: Date.now(),
     pendingToolCalls: new Map(),
     seenToolUseIds: new Set(),

@@ -12,6 +12,7 @@ import { readNewFileLines } from './fs-utils'
 export class JsonlEventSource implements vscode.Disposable {
   private watcher: fs.FSWatcher | null = null
   private fileSize = 0
+  private fileTail = ''
   private readonly _onEvent = new vscode.EventEmitter<AgentEvent>()
   private readonly _onStatus = new vscode.EventEmitter<'connected' | 'disconnected'>()
 
@@ -54,9 +55,10 @@ export class JsonlEventSource implements vscode.Disposable {
   }
 
   private readNewLines(): void {
-    const result = readNewFileLines(this.filePath, this.fileSize)
+    const result = readNewFileLines(this.filePath, this.fileSize, this.fileTail)
     if (!result) return
     this.fileSize = result.newSize
+    this.fileTail = result.tail
     for (const line of result.lines) {
       const event = this.parseLine(line)
       if (event) {
