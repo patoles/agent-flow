@@ -7,6 +7,7 @@
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test'
+import { once } from 'node:events'
 import assert from 'node:assert/strict'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -133,7 +134,7 @@ describe('findSubagentsDirs', () => {
 })
 
 describe('followSession', () => {
-  it('re-points a session whose transcript moved into a worktree folder, keeping offsets', () => {
+  it('re-points a session whose transcript moved into a worktree folder, keeping offsets', async () => {
     write(`${REPO}/${SESSION_ID}.jsonl`, '{"type":"user"}\npartial-main')
     session.fileSize = fs.statSync(session.filePath).size
     session.fileTail = 'partial-main'
@@ -144,7 +145,12 @@ describe('followSession', () => {
 
     // Windows locks watched paths. Close the subagent file watcher before
     // simulating EnterWorktree; moveSubagentWatchers reattaches it afterwards.
-    session.subagentWatchers.get(oldSub)!.watcher?.close()
+    const watcher = session.subagentWatchers.get(oldSub)!.watcher
+    if (watcher) {
+      const closed = once(watcher, 'close')
+      watcher.close()
+      await closed
+    }
     session.subagentWatchers.get(oldSub)!.watcher = null
 
     // What EnterWorktree does: move the transcript and the session folder
