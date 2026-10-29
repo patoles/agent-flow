@@ -82,6 +82,26 @@ describe('readNewFileLines', () => {
     assert.ok(!second!.lines.includes('bbb-cuthere'))
   })
 
+  it('preserves a partial line across repeated reads until it is complete', () => {
+    fs.writeFileSync(file, '{"type":"assistant","text":')
+    const first = readNewFileLines(file, 0)
+    assert.ok(first)
+    assert.deepEqual(first!.lines, [])
+    assert.equal(first!.tail, '{"type":"assistant","text":')
+
+    fs.appendFileSync(file, '"hello"}')
+    const second = readNewFileLines(file, first!.newSize, first!.tail)
+    assert.ok(second)
+    assert.deepEqual(second!.lines, [])
+    assert.equal(second!.tail, '{"type":"assistant","text":"hello"}')
+
+    fs.appendFileSync(file, '\n')
+    const third = readNewFileLines(file, second!.newSize, second!.tail)
+    assert.ok(third)
+    assert.deepEqual(third!.lines, ['{"type":"assistant","text":"hello"}'])
+    assert.equal(third!.tail, '')
+  })
+
   it('resets to 0 when the file is truncated', () => {
     fs.writeFileSync(file, 'only\n')
     const r = readNewFileLines(file, 9999, 'stale-tail')
