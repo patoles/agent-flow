@@ -262,9 +262,10 @@ function readNewLines(sessionId: string) {
   const session = sessions.get(sessionId)
   if (!session) return
 
-  const result = readNewFileLines(session.filePath, session.fileSize)
+  const result = readNewFileLines(session.filePath, session.fileSize, session.fileTail)
   if (!result) return
   session.fileSize = result.newSize
+  session.fileTail = result.tail
   for (const line of result.lines) {
     parser.processTranscriptLine(line, ORCHESTRATOR_NAME, session.pendingToolCalls, session.seenToolUseIds, sessionId, session.seenMessageHashes)
   }
