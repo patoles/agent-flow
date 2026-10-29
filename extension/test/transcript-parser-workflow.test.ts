@@ -39,6 +39,7 @@ function makeSession(): WatchedSession {
     fileWatcher: null,
     pollTimer: null,
     fileSize: 0,
+    fileTail: '',
     sessionStartTime: Date.now(),
     pendingToolCalls: new Map(),
     seenToolUseIds: new Set(),
