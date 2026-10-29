@@ -196,7 +196,7 @@ function watchSession(sessionId: string, filePath: string) {
   const defaultLabel = `Session ${sessionId.slice(0, SESSION_ID_DISPLAY)}`
   const session: WatchedSession = {
     sessionId, filePath,
-    fileWatcher: null, pollTimer: null, fileSize: 0,
+    fileWatcher: null, pollTimer: null, fileSize: 0, fileTail: '',
     sessionStartTime: Date.now(),
     pendingToolCalls: new Map(),
     seenToolUseIds: new Set(),
