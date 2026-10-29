@@ -391,6 +391,7 @@ export class SessionWatcher implements AgentSessionWatcher {
       fileWatcher: null,
       pollTimer: null,
       fileSize: 0,
+      fileTail: '',
       sessionStartTime: Date.now(),
       pendingToolCalls: new Map(),
       seenToolUseIds: new Set(),
@@ -486,9 +487,10 @@ export class SessionWatcher implements AgentSessionWatcher {
     const session = this.sessions.get(sessionId)
     if (!session) { return }
 
-    const result = readNewFileLines(session.filePath, session.fileSize)
+    const result = readNewFileLines(session.filePath, session.fileSize, session.fileTail)
     if (!result) return
     session.fileSize = result.newSize
+    session.fileTail = result.tail
     for (const line of result.lines) {
       this.parser.processTranscriptLine(line, ORCHESTRATOR_NAME, session.pendingToolCalls, session.seenToolUseIds, sessionId, session.seenMessageHashes)
     }
