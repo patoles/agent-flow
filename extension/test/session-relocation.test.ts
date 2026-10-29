@@ -153,6 +153,15 @@ describe('followSession', () => {
     }
     session.subagentWatchers.get(oldSub)!.watcher = null
 
+    // The recursive directory watcher also holds a handle under the session
+    // folder on Windows, so wait for it to close before simulating the move.
+    if (session.subagentsDirWatcher) {
+      const closed = once(session.subagentsDirWatcher, 'close')
+      session.subagentsDirWatcher.close()
+      await closed
+      session.subagentsDirWatcher = null
+    }
+
     // What EnterWorktree does: move the transcript and the session folder
     fs.mkdirSync(path.join(root, WORKTREE))
     fs.renameSync(path.join(root, REPO, `${SESSION_ID}.jsonl`), path.join(root, WORKTREE, `${SESSION_ID}.jsonl`))
