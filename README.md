@@ -141,6 +141,8 @@ Other scripts:
 
 Created by [Simon Patole](https://github.com/patoles), for [Antics](https://antics.gg).
 
+Want an MCP server for your product, or Claude Code set up for your team? [Work with me](https://simonpatole.com).
+
 ## Privacy & Telemetry
 
 Agent Flow ships **opt-out** anonymous usage telemetry, enabled by default only
