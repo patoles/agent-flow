@@ -119,6 +119,7 @@ export const TopBar = memo(function TopBar({
             sessionsWithActivity={sessionsWithActivity}
             onSelectSession={onSelectSession}
             onCloseSession={onCloseSession}
+            showFolder={!isVSCode || new Set(sessions.map(s => s.cwd).filter(Boolean)).size > 1}
           />
         </div>
       )}
