@@ -32,6 +32,7 @@ interface CanvasProps {
   showHexGrid: boolean
   zoomToFitTrigger?: number
   pauseAutoFit?: boolean
+  autoFit: boolean
   onAgentClick: (agentId: string | null) => void
   onAgentHover: (agentId: string | null) => void
   onAgentDrag: (agentId: string, x: number, y: number) => void
@@ -45,7 +46,7 @@ interface CanvasProps {
 
 export function AgentCanvas({
   simulationRef,
-  selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
+  selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit, autoFit,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, showCostOverlay,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -108,7 +109,7 @@ export function AgentCanvas({
     screenToCanvas, doZoomToFit, updateCamera,
   } = useCanvasCamera({
     mainCanvasRef, drawPropsRef, simTimeRef, dimensions,
-    agentCount: sim.agents.size, zoomToFitTrigger, selectedAgentId,
+    agentCount: sim.agents.size, zoomToFitTrigger, selectedAgentId, autoFit,
   })
 
   // ─── Interaction ────────────────────────────────────────────────────────

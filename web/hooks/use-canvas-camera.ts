@@ -27,6 +27,8 @@ interface CameraOptions {
   agentCount: number
   zoomToFitTrigger?: number
   selectedAgentId: string | null
+  /** Keep the camera continuously fitted to the graph. When false, fit only happens on request. */
+  autoFit: boolean
 }
 
 export function useCanvasCamera({
@@ -37,6 +39,7 @@ export function useCanvasCamera({
   agentCount,
   zoomToFitTrigger,
   selectedAgentId,
+  autoFit,
 }: CameraOptions) {
   const transformRef = useRef<Transform>({ x: 0, y: 0, scale: 1 })
   const userHasNavigatedRef = useRef(false)
@@ -159,20 +162,22 @@ export function useCanvasCamera({
   }, [getDescendantIds, drawPropsRef, simTimeRef])
 
   const doZoomToFit = useCallback(() => {
-    userHasNavigatedRef.current = false
+    // One-shot fit; only re-engage continuous fitting when auto-fit is on
+    if (autoFit) userHasNavigatedRef.current = false
     const target = computeFitTransform()
     if (target) targetTransformRef.current = target
-  }, [computeFitTransform])
+  }, [computeFitTransform, autoFit])
 
   useEffect(() => {
     if (zoomToFitTrigger && zoomToFitTrigger > 0) doZoomToFit()
   }, [zoomToFitTrigger, doZoomToFit])
 
-  // Re-engage auto-fit when selection changes
+  // Re-engage auto-fit when selection changes (only in auto-fit mode)
   useEffect(() => {
+    if (!autoFit) return
     userHasNavigatedRef.current = false
     targetTransformRef.current = null
-  }, [selectedAgentId])
+  }, [selectedAgentId, autoFit])
 
   const screenToCanvas = useCallback((screenX: number, screenY: number) => {
     const canvas = mainCanvasRef.current
@@ -201,7 +206,7 @@ export function useCanvasCamera({
     }
 
     // Auto-fit
-    if (!userHasNavigatedRef.current && !isDragging && !pauseAutoFit) {
+    if (autoFit && !userHasNavigatedRef.current && !isDragging && !pauseAutoFit) {
       const fit = computeFitTransform()
       if (fit) targetTransformRef.current = fit
     }
@@ -221,7 +226,7 @@ export function useCanvasCamera({
         transformRef.current = { x: nx, y: ny, scale: ns }
       }
     }
-  }, [computeFitTransform])
+  }, [computeFitTransform, autoFit])
 
   return {
     transformRef,

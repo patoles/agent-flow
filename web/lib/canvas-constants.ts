@@ -4,12 +4,12 @@
  *  (formatModelName in utils.ts), context-window sizes, and cost rates all
  *  derive from this table — add new families here and nowhere else.
  *  Rates are blended $/M-token (0.75 × input + 0.25 × output per-MTok). */
-export const CLAUDE_FAMILIES: ReadonlyArray<{ name: string; context: number; rate: number }> = [
-  { name: 'fable',  context: 1_000_000, rate: 20 }, // $10 in / $50 out
-  { name: 'mythos', context: 1_000_000, rate: 20 }, // $10 in / $50 out
-  { name: 'opus',   context: 1_000_000, rate: 10 }, // $5 in / $25 out
-  { name: 'sonnet', context: 1_000_000, rate: 6 },  // $3 in / $15 out
-  { name: 'haiku',  context: 200_000,   rate: 2 },  // $1 in / $5 out
+export const CLAUDE_FAMILIES: ReadonlyArray<{ name: string; context: number; rate: number; color: string }> = [
+  { name: 'fable',  context: 1_000_000, rate: 20, color: '#66ccff' }, // $10 in / $50 out — azure
+  { name: 'mythos', context: 1_000_000, rate: 20, color: '#66ccff' }, // $10 in / $50 out
+  { name: 'opus',   context: 1_000_000, rate: 10, color: '#ff8c42' }, // $5 in / $25 out — orange
+  { name: 'sonnet', context: 1_000_000, rate: 6,  color: '#f0f4f8' }, // $3 in / $15 out — white
+  { name: 'haiku',  context: 200_000,   rate: 2,  color: '#66ffaa' }, // $1 in / $5 out — green
 ]
 
 /** Regex alternation fragment of all Claude family names (e.g. 'fable|mythos|…'). */
@@ -121,6 +121,9 @@ export const ANIM_SPEED = {
 export const AUTO_SCROLL_THRESHOLD = 60
 
 // ─── Camera / interaction constants ─────────────────────────────────────────
+
+/** localStorage key for the auto-fit camera preference */
+export const AUTOFIT_PREF_KEY = 'agent-flow-autofit'
 
 export const CAMERA = {
   zoomStepDown: 0.92,
