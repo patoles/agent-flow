@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.5
+
+- Fix: events were sometimes lost when Agent Flow read a transcript while Claude Code was still writing a line (#105, #106)
+  - A read that landed mid-write dropped the first half of the line, and the second half later failed to parse, so that tool call or message never appeared. The session, subagent, event-log and standalone-app watchers now keep the unfinished line and complete it on the next read, as the Codex watcher already did
+
 ## 0.9.4
 
 - Fix: sessions that enter a git worktree mid-session no longer freeze (#69)
