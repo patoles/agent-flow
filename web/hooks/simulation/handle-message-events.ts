@@ -1,7 +1,10 @@
 import type { ContextBreakdown } from '@/lib/agent-types'
 import type { ConversationMessage } from './types'
 import { appendConversation, asString, asNumber, LABEL_LEN_NAME, LABEL_LEN_TASK, LABEL_LEN_BUBBLE, MAX_BUBBLES } from './types'
-import type { MutableEventState } from './process-event'
+import type { MutableEventState, ProcessEventContext } from './process-event'
+import { pushTimelineBlock } from './process-event'
+import { COLORS } from '@/lib/colors'
+import { formatTokens } from '@/lib/utils'
 
 export function handleMessage(
   payload: Record<string, unknown>,
@@ -80,4 +83,26 @@ export function handleContextUpdate(
       state: agent.state === 'complete' ? 'complete' : 'thinking'
     })
   }
+}
+
+/** Context compaction: the boss died, a relic (the summary) drops. Marks the timeline and leaves the relic in the transcript. */
+export function handleContextCompacted(
+  payload: Record<string, unknown>,
+  currentTime: number,
+  state: MutableEventState,
+  ctx: ProcessEventContext,
+): void {
+  const agentName = asString(payload.agent)
+  const before = asNumber(payload.before)
+  const after = asNumber(payload.after)
+  const relic = asString(payload.relic)
+  const agent = state.agents.get(agentName)
+  if (agent) {
+    const bubble = { text: `⟲ Context compacted: ${formatTokens(before)} → ${formatTokens(after)}`, time: currentTime, role: 'assistant' as const }
+    const newBubbles = [...agent.messageBubbles, bubble]
+    state.agents.set(agentName, { ...agent, messageBubbles: newBubbles.length > MAX_BUBBLES ? newBubbles.slice(-MAX_BUBBLES) : newBubbles })
+  }
+  const entry = state.timelineEntries.get(agentName)
+  if (entry) pushTimelineBlock(entry, currentTime, { type: 'idle', label: `Compacted ${formatTokens(before)} → ${formatTokens(after)}`, color: COLORS.paused, endTime: currentTime + 1 }, ctx)
+  appendConversation(state.conversations, agentName, { type: 'assistant', content: `⟲ CONTEXT COMPACTED (${formatTokens(before)} → ${formatTokens(after)})\n\nRelic:\n${relic}`, timestamp: currentTime })
 }
