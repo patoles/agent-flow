@@ -1,11 +1,18 @@
 import { COLORS } from '@/lib/colors'
 import { TOOL_DEDUP_WINDOW_S } from '@/lib/canvas-constants'
+import type { ToolCallNode } from '@/lib/agent-types'
 import { pushTimelineBlock, type ProcessEventContext, type MutableEventState } from './process-event'
 import { appendConversation, asString, asBoolean, LABEL_LEN_PARTICLE, LABEL_LEN_TIMELINE } from './types'
 
 /** Extract file path from tool input data or fall back to first token of args */
 function extractFilePath(inputData?: Record<string, unknown>, args?: string): string {
   return asString(inputData?.file_path) || args?.split(' ')[0] || ''
+}
+
+/** Whether both the event and the node carry a toolUseId, so they can be matched exactly.
+ *  Older recordings and sources without ids fall back to matching by tool name. */
+function bothHaveIds(tc: ToolCallNode, toolUseId: string): boolean {
+  return Boolean(toolUseId && tc.toolUseId)
 }
 
 export function handleToolCallStart(
@@ -16,17 +23,22 @@ export function handleToolCallStart(
 ): void {
   const agentName = asString(payload.agent)
   const toolName = asString(payload.tool)
+  const toolUseId = asString(payload.toolUseId)
   const args = asString(payload.args)
   const inputData = (payload.inputData && typeof payload.inputData === 'object' && !Array.isArray(payload.inputData))
     ? payload.inputData as Record<string, unknown> : undefined
   const agent = state.agents.get(agentName)
 
   if (agent) {
-    // Dedup: skip if there's already a running tool call for the same agent+tool
-    // created within the last 3 seconds (race between Hook Server and Session Watcher)
+    // Dedup: the Hook Server and the Session Watcher both report each call with the
+    // same toolUseId. Without ids, skip a running call for the same agent+tool
+    // created within the last 3 seconds instead.
     let isDuplicate = false
     for (const tc of state.toolCalls.values()) {
-      if (tc.agentId === agentName && tc.toolName === toolName && tc.state === 'running' && (currentTime - tc.startTime) < TOOL_DEDUP_WINDOW_S) {
+      if (tc.agentId !== agentName) continue
+      if (bothHaveIds(tc, toolUseId)
+        ? tc.toolUseId === toolUseId
+        : tc.toolName === toolName && tc.state === 'running' && (currentTime - tc.startTime) < TOOL_DEDUP_WINDOW_S) {
         isDuplicate = true
         break
       }
@@ -40,12 +52,13 @@ export function handleToolCallStart(
       toolCalls: agent.toolCalls + 1
     })
 
-    const toolId = `tool-${agentName}-${toolName}-${currentTime}`
+    const toolId = toolUseId ? `tool-${agentName}-${toolUseId}` : `tool-${agentName}-${toolName}-${currentTime}`
 
     const pos = ctx.findToolSlot(agent, state.agents, state.toolCalls, currentTime)
 
     state.toolCalls.set(toolId, {
       id: toolId, agentId: agentName, toolName,
+      ...(toolUseId ? { toolUseId } : {}),
       state: 'running',
       args,
       inputData,
@@ -102,11 +115,14 @@ export function handleToolCallEnd(
 ): void {
   const agentName = asString(payload.agent)
   const toolName = asString(payload.tool)
+  const toolUseId = asString(payload.toolUseId)
   const result = asString(payload.result, 'Done')
   const tokenCost = typeof payload.tokenCost === 'number' ? payload.tokenCost : undefined
   const isError = asBoolean(payload.isError)
   const errorMessage = typeof payload.errorMessage === 'string' ? payload.errorMessage : undefined
   const agent = state.agents.get(agentName)
+  const isSameCall = (tc: ToolCallNode) => tc.agentId === agentName
+    && (bothHaveIds(tc, toolUseId) ? tc.toolUseId === toolUseId : tc.toolName === toolName)
 
   if (agent) {
     state.agents.set(agentName, {
@@ -118,7 +134,7 @@ export function handleToolCallEnd(
 
     const toolState: 'error' | 'complete' = isError ? 'error' : 'complete'
     for (const [id, tc] of state.toolCalls) {
-      if (tc.agentId === agentName && tc.toolName === toolName && tc.state === 'running') {
+      if (isSameCall(tc) && tc.state === 'running') {
         state.toolCalls.set(id, { ...tc, state: toolState, completeTime: currentTime, result, tokenCost, errorMessage: isError ? (errorMessage || result) : undefined })
 
         const edgeId = `edge-${id}`
@@ -152,7 +168,7 @@ export function handleToolCallEnd(
 
     // File attention token cost
     if (tokenCost) {
-      const matchedTc = Array.from(state.toolCalls.values()).find(tc => tc.agentId === agentName && tc.toolName === toolName)
+      const matchedTc = Array.from(state.toolCalls.values()).find(isSameCall)
       const filePath = extractFilePath(matchedTc?.inputData, matchedTc?.args)
       if (filePath) {
         const existing = state.fileAttention.get(filePath)

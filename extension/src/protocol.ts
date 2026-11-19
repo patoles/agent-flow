@@ -24,6 +24,8 @@ export type AgentEventType =
 export interface AgentEvent {
   time: number
   type: AgentEventType
+  /** tool_call_start / tool_call_end carry `toolUseId` (Claude tool_use id, Codex call_id)
+   *  when the source has one, so the web view can match parallel calls to the same tool. */
   payload: Record<string, unknown>
   sessionId?: string
 }

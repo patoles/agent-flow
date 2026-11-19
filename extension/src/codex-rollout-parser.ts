@@ -410,6 +410,7 @@ export class CodexRolloutParser {
       payload: {
         agent: ORCHESTRATOR_NAME,
         tool: name,
+        toolUseId: callId,
         args: argsSummary,
         preview: `${name}: ${argsSummary}`.slice(0, PREVIEW_MAX),
         inputData: extractInputData(name, args ?? {}),
@@ -438,6 +439,7 @@ export class CodexRolloutParser {
       payload: {
         agent: ORCHESTRATOR_NAME,
         tool: pending.name,
+        toolUseId: callId,
         result: resultSummary,
         tokenCost,
         ...(isError ? { isError: true, errorMessage: resultSummary } : {}),
@@ -467,6 +469,7 @@ export class CodexRolloutParser {
       payload: {
         agent: ORCHESTRATOR_NAME,
         tool: name,
+        toolUseId: callId,
         args: argsSummary,
         preview: `${name}: ${argsSummary}`.slice(0, PREVIEW_MAX),
         inputData: extractInputData(name, { patch: rawInput }),

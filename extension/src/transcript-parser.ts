@@ -367,6 +367,7 @@ export class TranscriptParser {
       payload: {
         agent: agentName,
         tool: toolName,
+        toolUseId: block.id,
         args,
         preview: `${toolName}: ${args}`.slice(0, PREVIEW_MAX),
         inputData: extractInputData(toolName, block.input),
@@ -438,6 +439,7 @@ export class TranscriptParser {
       payload: {
         agent: agentName,
         tool: toolName,
+        toolUseId: block.tool_use_id,
         result: result.slice(0, RESULT_MAX),
         tokenCost,
         ...(discovery ? { discovery } : {}),

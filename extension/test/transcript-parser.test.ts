@@ -226,6 +226,22 @@ describe('subagent model (#91)', () => {
   })
 })
 
+describe('tool call ids (#107)', () => {
+  it('carries the tool_use id on tool_call_start and tool_call_end', () => {
+    const { events, feed } = setup()
+    feed({ type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [
+      { type: 'tool_use', id: 'toolu_a', name: 'Read', input: { file_path: 'src/a.ts' } },
+      { type: 'tool_use', id: 'toolu_b', name: 'Read', input: { file_path: 'src/b.ts' } },
+    ] } })
+    feed({ type: 'user', uuid: 'r1', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'toolu_b', content: 'b contents' },
+    ] } })
+
+    assert.deepEqual(ofType(events, 'tool_call_start').map(e => e.payload.toolUseId), ['toolu_a', 'toolu_b'])
+    assert.deepEqual(ofType(events, 'tool_call_end').map(e => e.payload.toolUseId), ['toolu_b'])
+  })
+})
+
 describe('parseTaskNotification', () => {
   it('extracts the tool use id, status and result', () => {
     const text = taskNotification('toolu_9', 'killed', 'a &gt; b').message.content as string
