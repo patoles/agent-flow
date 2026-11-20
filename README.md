@@ -15,6 +15,8 @@ Claude Code is powerful, but its execution is a black box — you see the final 
 - **See where time is spent** — Identify slow tool calls, unnecessary branching, or redundant work at a glance
 - **Learn by watching** — Build intuition for how to write better prompts by observing how Claude interprets and executes them
 
+Running many sessions at once? Agent Flow pairs with [Ravenry](https://patoles.github.io/ravenry/): Agent Flow shows what one session is doing inside, Ravenry puts all your Claude Code and Codex sessions on one board, shows which one needs you, and lets you answer from your phone.
+
 ## Features
 
 - **Live agent visualization**: Watch agent execution as an interactive node graph with real-time tool calls, branching, and return flows
@@ -139,7 +141,7 @@ Other scripts:
 
 ## Author
 
-Created by [Simon Patole](https://github.com/patoles), for [Antics](https://antics.gg).
+Created by [Simon Patole](https://github.com/patoles), for [Antics](https://antics.gg). Also by me: [Ravenry](https://patoles.github.io/ravenry/), one board for all your agent sessions.
 
 Want an MCP server for your product, or Claude Code set up for your team? [Work with me](https://simonpatole.com).
 
