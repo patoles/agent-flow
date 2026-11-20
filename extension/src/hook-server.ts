@@ -217,6 +217,7 @@ export class HookServer implements vscode.Disposable {
       payload: {
         agent: agentName,
         tool: toolName,
+        toolUseId: payload.tool_use_id,
         args,
         preview: `${toolName}: ${args}`.slice(0, PREVIEW_MAX),
       },
@@ -238,6 +239,7 @@ export class HookServer implements vscode.Disposable {
       payload: {
         agent: agentName,
         tool: toolName,
+        toolUseId: payload.tool_use_id,
         result: result.slice(0, RESULT_MAX),
         tokenCost,
         ...(discovery ? { discovery } : {}),
@@ -255,6 +257,7 @@ export class HookServer implements vscode.Disposable {
       payload: {
         agent: agentName,
         tool: toolName,
+        toolUseId: payload.tool_use_id,
         result: `[FAILED] ${(payload.tool_response ? summarizeResult(payload.tool_response) : '').slice(0, FAILED_RESULT_MAX)}`,
         tokenCost: 0,
       },

@@ -62,6 +62,7 @@ export interface ToolCallNode {
   id: string
   agentId: string
   toolName: string
+  toolUseId?: string    // tool_use id / Codex call_id; absent in older recordings
   state: 'running' | 'complete' | 'error'
   args: string          // human-readable argument summary
   result?: string       // human-readable result summary

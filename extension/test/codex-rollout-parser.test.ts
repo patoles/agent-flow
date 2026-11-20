@@ -100,6 +100,9 @@ describe('CodexRolloutParser', () => {
     assert.equal(starts.length, 1)
     assert.equal(ends.length, 1)
     assert.ok(!state.pendingToolCalls.has('call-exec-1'), 'pending should be cleared on output')
+    // call_id reaches the web view so parallel calls to one tool stay apart (#107)
+    assert.equal(starts[0].payload.toolUseId, 'call-exec-1')
+    assert.equal(ends[0].payload.toolUseId, 'call-exec-1')
   })
 
   it('unwraps the nested JSON envelope in function_call_output', () => {
@@ -117,6 +120,8 @@ describe('CodexRolloutParser', () => {
     assert.equal(starts.length, 1)
     assert.equal(ends.length, 1)
     assert.ok(!state.pendingToolCalls.has('call-patch-1'))
+    assert.equal(starts[0].payload.toolUseId, 'call-patch-1')
+    assert.equal(ends[0].payload.toolUseId, 'call-patch-1')
   })
 
   it('emits WebSearch as a self-contained start+end pair', () => {
