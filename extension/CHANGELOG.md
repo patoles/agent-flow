@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.6
+
+- Fix: parallel calls to the same tool now show up separately (#107, #110)
+  - Calls were matched by agent and tool name, so several `Read` calls started together collapsed into one node with only the first file in file attention, and a result could complete the wrong call. Tool call events now carry the call's id (the Claude `tool_use` id, the hook's `tool_use_id`, or the Codex `call_id`), and each call is tracked and completed by its id. Events without an id, such as older recordings, keep the previous matching
+
 ## 0.9.5
 
 - Fix: events were sometimes lost when Agent Flow read a transcript while Claude Code was still writing a line (#105, #106)
