@@ -4,6 +4,7 @@ import { JsonlEventSource } from './event-source'
 import { WebviewToExtensionMessage } from './protocol'
 import { startClaudeRuntime } from './claude-runtime'
 import { startCodexRuntime } from './codex-runtime'
+import { startStrandsRuntime } from './strands-runtime'
 import { promptHookSetupIfNeeded, configureClaudeHooks, isDisable1MContext } from './hooks-config'
 import { createLogger } from './logger'
 import type { AgentRuntime, AgentRuntimeMode } from './session-runtime'
@@ -17,7 +18,7 @@ let runtimes: AgentRuntime[] = []
 
 function readConfiguredMode(): ConfiguredRuntimeMode {
   const raw = vscode.workspace.getConfiguration('agentVisualizer').get<string>('runtime', 'auto')
-  return raw === 'claude' || raw === 'codex' ? raw : 'auto'
+  return raw === 'claude' || raw === 'codex' || raw === 'strands' ? raw : 'auto'
 }
 
 interface StartRuntimesResult {
@@ -40,6 +41,11 @@ async function startRuntimes(
     log.info('Starting Codex runtime...')
     try { runtimes.push(startCodexRuntime(context)) }
     catch (err) { log.error('Codex runtime failed to start:', err); failures.push('codex') }
+  }
+  if (mode === 'strands' || mode === 'auto') {
+    log.info('Starting Strands runtime...')
+    try { runtimes.push(startStrandsRuntime(context)) }
+    catch (err) { log.error('Strands runtime failed to start:', err); failures.push('strands') }
   }
   return { runtimes, failures }
 }

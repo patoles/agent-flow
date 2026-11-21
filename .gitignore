@@ -27,3 +27,5 @@ extension/.vscode/
 extension/package-lock.json
 
 .DS_Store
+__pycache__/
+validation/
